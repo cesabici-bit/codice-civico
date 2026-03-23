@@ -37,12 +37,14 @@ def ingest(source: str, limit: int | None, year: int | None, month: int | None) 
     """Run data ingestion for a specific source."""
     from codicecivico.ingest.anac import AnacIngestor
     from codicecivico.ingest.camera import CameraIngestor
+    from codicecivico.ingest.giustizia import GiustiziaIngestor
     from codicecivico.ingest.senato import SenatoIngestor
 
     ingestors: dict[str, type] = {
         "camera": CameraIngestor,
         "senato": SenatoIngestor,
         "anac": AnacIngestor,
+        "giustizia": GiustiziaIngestor,
     }
 
     cls = ingestors.get(source)

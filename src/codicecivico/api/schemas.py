@@ -138,6 +138,30 @@ class TribunalDetail(TribunalSummary):
     stats: list[CourtStatResponse] = []
 
 
+class TribunalRanking(BaseModel):
+    """Tribunal with a single metric for ranking."""
+
+    name: str
+    region: str | None
+    province: str | None
+    lat: float | None
+    lon: float | None
+    metric_value: float | None
+    metric_name: str
+    year: int | None
+
+
+class NationalYearStats(BaseModel):
+    """Aggregated national court statistics for a single year."""
+
+    year: int
+    total_incoming: int
+    total_resolved: int
+    total_pending: int
+    clearance_rate: float | None
+    avg_disposition_time: float | None
+
+
 # ---------------------------------------------------------------------------
 # Laws
 # ---------------------------------------------------------------------------

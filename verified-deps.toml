@@ -141,6 +141,16 @@ verified_via = "https://pypi.org/project/APScheduler/"
 methods_used = ["AsyncIOScheduler()", "add_job()", "start()"]
 notes = "In-process task scheduler for data ingestion cron"
 
+# === Data Parsing ===
+
+[[dependency]]
+name = "openpyxl"
+version = "3.1.5"
+verified_date = "2026-03-23"
+verified_via = "https://pypi.org/project/openpyxl/"
+methods_used = ["load_workbook()", "wb.sheetnames", "ws.iter_rows()", "cell.value"]
+notes = "Excel .xlsx parser for Ministero Giustizia court statistics"
+
 # === Dev Tools ===
 
 [[dependency]]

@@ -1,10 +1,10 @@
 # Status — Codice Civico
 
 ## Fase Corrente
-F4 NLP Promise Tracker — COMPLETED | F3 Anomaly Detection — COMPLETED | F2 Ingestion — COMPLETED
+F5 Justice Map — COMPLETED | F4 NLP Promise Tracker — COMPLETED | F3 Anomaly Detection — COMPLETED | F2 Ingestion — COMPLETED
 
 ## Ultimo Subtask Completato
-ST-4.6: CLI + Tests L1-L3 (139 test verdi totali)
+ST-5.6: CLI + Tests L1-L3 (163 test verdi totali)
 
 ## Subtask Completati F2
 - ST-2.3: Base ingestor enhancements (SPARQL helper con retry/timeout/logging, pagination, ingestion log)
@@ -30,8 +30,16 @@ ST-4.6: CLI + Tests L1-L3 (139 test verdi totali)
 - ST-4.5: Promise-legislation matching (sentence-transformers MiniLM-L12 + TF-IDF fallback, cosine similarity). Added matched_act_id + match_similarity to Promise model
 - ST-4.6: 63 NLP test (L1 unit per funzione, L2 con SOURCE da Camera.it/Treccani, L3 Hypothesis property-based) + 15 matcher test
 
+## Subtask Completati F5 (Justice Map)
+- ST-5.1: openpyxl dependency + tribunali_seed.py (143 tribunali, 20 regioni, coordinate)
+- ST-5.2: GiustiziaIngestor — Excel download + parse (column resolution, metric computation)
+- ST-5.3: Upsert CourtStat + tribunal seeding + clearance_rate/disposition_time computation
+- ST-5.4: 24 test (L1 unit parse/metrics, L2 SOURCE CEPEJ/MinGiustizia/ISTAT, L3 Hypothesis property-based)
+- ST-5.5: API rankings (GET /courts/rankings) + national stats (GET /courts/stats/national)
+- ST-5.6: CLI `ingest --source giustizia` + full suite 163 test verdi
+
 ## Prossimo Subtask
-F5: Justice Map (scraping statistiche ~140 tribunali + choropleth) o Legislative Translator (Ollama) — attendere direzione utente
+F6: Legislative Translator (Ollama LLaMAntino) — attendere direzione utente
 
 ## Blockers
 - `make` non disponibile su Windows — usare comandi diretti (mypy, ruff, pytest)
@@ -46,6 +54,7 @@ F5: Justice Map (scraping statistiche ~140 tribunali + choropleth) o Legislative
 - 2026-03-23: F2 entity resolution + ANAC — entity resolver (4 strategie), ANAC bulk CSV ingestor, CLI entity-resolve. 47 test verdi (mypy + ruff + pytest).
 - 2026-03-23: F3 anomaly detection — 7 rules, IsolationForest (7 features), composite scorer (0-100). 76 test verdi totali.
 - 2026-03-23: F4 NLP Promise Tracker — sentence split, claim detection (14 patterns), topic classification (13 topic), specificity scoring, promise-legislation matching (sentence-transformers). 139 test verdi totali.
+- 2026-03-23: F5 Justice Map — GiustiziaIngestor (Excel parse), 143 tribunali seed, clearance rate/disposition time computation, API rankings + national stats. 163 test verdi totali.
 
 ## File Modificati F4
 - src/codicecivico/nlp/ner.py: split_sentences (spaCy + regex fallback), extract_entities
