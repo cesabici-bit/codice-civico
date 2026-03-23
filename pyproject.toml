@@ -1,0 +1,87 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "codice-civico"
+version = "0.1.0"
+description = "AI-powered civic accountability engine for Italian politics, judiciary, and public spending"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+authors = [
+    { name = "Genius Lab" },
+]
+keywords = ["civic-tech", "transparency", "politics", "procurement", "nlp", "italy"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Other Audience",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Sociology",
+]
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.30",
+    "alembic>=1.14",
+    "pydantic>=2.11",
+    "pydantic-settings>=2.8",
+    "httpx>=0.28",
+    "click>=8.1",
+    "SPARQLWrapper>=2.0",
+    "beautifulsoup4>=4.13",
+    "lxml>=5.3",
+    "pdfplumber>=0.11",
+    "APScheduler>=3.11",
+]
+
+[project.optional-dependencies]
+nlp = [
+    "spacy>=3.8",
+    "scikit-learn>=1.6",
+    "sentence-transformers>=4.1",
+    "torch>=2.0",
+]
+dev = [
+    "pytest>=9.0",
+    "pytest-asyncio>=0.25",
+    "hypothesis>=6.100",
+    "ruff>=0.9",
+    "mypy>=1.14",
+    "httpx",
+]
+
+[project.scripts]
+codicecivico = "codicecivico.cli.main:cli"
+
+[project.urls]
+Homepage = "https://github.com/genius-lab/codice-civico"
+Documentation = "https://github.com/genius-lab/codice-civico#readme"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/codicecivico"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+mypy_path = "src"
+packages = ["codicecivico"]
+
+[tool.ruff]
+src = ["src"]
+line-length = 99
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

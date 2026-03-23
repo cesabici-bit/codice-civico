@@ -1,0 +1,20 @@
+{
+  "results": {
+    "bindings": [
+      {
+        "ddl": {"type": "uri", "value": "http://dati.senato.it/osr/Ddl/19/1"},
+        "titolo": {"type": "literal", "value": "Conversione in legge del decreto-legge 2 novembre 2022, n. 169"},
+        "dataPresentazione": {"type": "literal", "value": "2022-11-03"},
+        "stato": {"type": "literal", "value": "approvato"},
+        "natura": {"type": "literal", "value": "Conversione decreto-legge"}
+      },
+      {
+        "ddl": {"type": "uri", "value": "http://dati.senato.it/osr/Ddl/19/2"},
+        "titolo": {"type": "literal", "value": "Bilancio di previsione dello Stato per l'anno finanziario 2023"},
+        "dataPresentazione": {"type": "literal", "value": "2022-11-22"},
+        "stato": {"type": "literal", "value": "approvato"},
+        "natura": {"type": "literal", "value": "DDL ordinario"}
+      }
+    ]
+  }
+}

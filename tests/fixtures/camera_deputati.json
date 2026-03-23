@@ -1,0 +1,25 @@
+{
+  "results": {
+    "bindings": [
+      {
+        "dep": {"type": "uri", "value": "http://dati.camera.it/ocd/deputato.rdf/d36064_19"},
+        "nome": {"type": "literal", "value": "GIORGIA"},
+        "cognome": {"type": "literal", "value": "MELONI"},
+        "foto": {"type": "uri", "value": "https://www.camera.it/assets/foto/deputati/d36064.jpg"},
+        "dataNascita": {"type": "literal", "value": "19770115"}
+      },
+      {
+        "dep": {"type": "uri", "value": "http://dati.camera.it/ocd/deputato.rdf/d30529_19"},
+        "nome": {"type": "literal", "value": "ELLY"},
+        "cognome": {"type": "literal", "value": "SCHLEIN"},
+        "dataNascita": {"type": "literal", "value": "19850404"}
+      },
+      {
+        "dep": {"type": "uri", "value": "http://dati.camera.it/ocd/deputato.rdf/d25230_19"},
+        "nome": {"type": "literal", "value": "MATTEO"},
+        "cognome": {"type": "literal", "value": "SALVINI"},
+        "dataNascita": {"type": "literal", "value": "19730309"}
+      }
+    ]
+  }
+}

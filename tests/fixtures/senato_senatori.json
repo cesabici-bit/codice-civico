@@ -1,0 +1,20 @@
+{
+  "results": {
+    "bindings": [
+      {
+        "sen": {"type": "uri", "value": "http://dati.senato.it/osr/Senatore/37653"},
+        "nome": {"type": "literal", "value": "Ignazio"},
+        "cognome": {"type": "literal", "value": "La Russa"},
+        "dataNascita": {"type": "literal", "value": "1947-07-18"},
+        "tipoMandato": {"type": "literal", "value": "eletto"}
+      },
+      {
+        "sen": {"type": "uri", "value": "http://dati.senato.it/osr/Senatore/36433"},
+        "nome": {"type": "literal", "value": "Matteo"},
+        "cognome": {"type": "literal", "value": "Renzi"},
+        "dataNascita": {"type": "literal", "value": "1975-01-11"},
+        "tipoMandato": {"type": "literal", "value": "eletto"}
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "results": {
+    "bindings": [
+      {
+        "atto": {"type": "uri", "value": "http://dati.camera.it/ocd/atto.rdf/leg19_atto_001"},
+        "titolo": {"type": "literal", "value": "Conversione in legge del decreto-legge recante misure urgenti"},
+        "tipo": {"type": "literal", "value": "DDL"},
+        "data": {"type": "literal", "value": "20221025"}
+      },
+      {
+        "atto": {"type": "uri", "value": "http://dati.camera.it/ocd/atto.rdf/leg19_atto_002"},
+        "titolo": {"type": "literal", "value": "Bilancio di previsione dello Stato per l'anno finanziario 2023"},
+        "tipo": {"type": "literal", "value": "DDL"},
+        "data": {"type": "literal", "value": "20221121"}
+      }
+    ]
+  }
+}

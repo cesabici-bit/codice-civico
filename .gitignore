@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# mypy / ruff / pytest / hypothesis caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+pgdata/
+
+# Model artifacts
+*.pkl
+*.joblib
+models/
