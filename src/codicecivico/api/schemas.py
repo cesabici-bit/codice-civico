@@ -16,6 +16,10 @@ class HealthResponse(BaseModel):
     version: str
 
 
+class HealthDetailedResponse(HealthResponse):
+    checks: dict[str, object] = {}
+
+
 # ---------------------------------------------------------------------------
 # Politicians
 # ---------------------------------------------------------------------------
@@ -183,6 +187,15 @@ class LawDetail(LawSummary):
     plain_translation: dict | None
     translated_at: datetime | None
     source_uri: str | None
+
+
+class TranslationResponse(BaseModel):
+    """Response for the translate endpoint."""
+    law_id: uuid.UUID
+    title: str
+    translation: dict
+    translated_at: datetime | None
+    cached: bool
 
 
 # ---------------------------------------------------------------------------

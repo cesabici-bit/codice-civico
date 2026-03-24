@@ -1,12 +1,16 @@
 """FastAPI application with lifespan and route mounting."""
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 
 from codicecivico import __version__
+from codicecivico.api.ratelimit import limiter
 from codicecivico.api.routes import (
     contracts,
     courts,
@@ -19,13 +23,30 @@ from codicecivico.api.routes import (
 )
 from codicecivico.config import settings
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application startup and shutdown."""
-    # Startup: could initialize DB pool, scheduler, NLP models here
+    # Configure logging
+    logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
+
+    # Start scheduler if enabled
+    _scheduler = None
+    if settings.scheduler_enabled:
+        from codicecivico.ingest.scheduler import setup_scheduler
+
+        _scheduler = setup_scheduler()
+        _scheduler.start()
+        logger.info("Scheduler started with %d jobs", len(_scheduler.get_jobs()))
+
     yield
-    # Shutdown: cleanup resources
+
+    # Shutdown
+    if _scheduler is not None:
+        _scheduler.shutdown(wait=False)
+        logger.info("Scheduler stopped")
 
 
 def create_app() -> FastAPI:
@@ -38,6 +59,16 @@ def create_app() -> FastAPI:
         ),
         version=__version__,
         lifespan=lifespan,
+    )
+
+    # Rate limiter
+    app.state.limiter = limiter
+    app.add_exception_handler(
+        RateLimitExceeded,
+        lambda req, exc: JSONResponse(
+            status_code=429,
+            content={"detail": "Rate limit exceeded. Try again later."},
+        ),
     )
 
     # CORS

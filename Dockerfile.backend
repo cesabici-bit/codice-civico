@@ -1,20 +1,64 @@
-FROM python:3.12-slim
+# ==============================================================================
+# Codice Civico — Backend Dockerfile (multi-stage, production-ready)
+# ==============================================================================
 
-WORKDIR /app
+# --- Stage 1: Builder ---
+FROM python:3.12-slim AS builder
 
-# System deps
+WORKDIR /build
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Python deps
 COPY pyproject.toml .
-RUN pip install --no-cache-dir -e ".[dev]"
+COPY src/ src/
 
-# Application code
-COPY . .
-RUN pip install --no-cache-dir -e .
+# Install production deps (core + nlp, no dev)
+RUN pip install --no-cache-dir --prefix=/install ".[nlp]"
+
+# Download spaCy Italian model
+RUN /install/bin/python -m spacy download it_core_news_lg 2>/dev/null || \
+    pip install --no-cache-dir --prefix=/install \
+    https://github.com/explosion/spacy-models/releases/download/it_core_news_lg-3.8.0/it_core_news_lg-3.8.0-py3-none-any.whl
+
+# --- Stage 2: Runtime ---
+FROM python:3.12-slim
+
+# Non-root user
+RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser
+
+# Runtime-only system deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy installed Python packages from builder
+COPY --from=builder /install /usr/local
+
+WORKDIR /app
+
+# Copy application code
+COPY src/ src/
+COPY pyproject.toml .
+COPY alembic.ini .
+COPY alembic/ alembic/
+
+# Install the app itself (editable, no deps — already installed)
+RUN pip install --no-cache-dir --no-deps -e .
+
+# Create data directory for ingest artifacts
+RUN mkdir -p /app/data/logs && chown -R appuser:appuser /app
+
+# Copy scripts
+COPY scripts/ scripts/
+RUN chmod +x scripts/*.sh 2>/dev/null || true
+
+USER appuser
 
 EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/api/v1/health || exit 1
 
 CMD ["uvicorn", "codicecivico.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

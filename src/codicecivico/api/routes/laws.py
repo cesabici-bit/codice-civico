@@ -1,13 +1,15 @@
 """Laws API routes."""
 
 import uuid
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from codicecivico.api.deps import get_db
-from codicecivico.api.schemas import LawDetail, LawSummary
+from codicecivico.api.ratelimit import limiter
+from codicecivico.api.schemas import LawDetail, LawSummary, TranslationResponse
 from codicecivico.models import LegislativeAct
 
 router = APIRouter(prefix="/laws", tags=["laws"])
@@ -47,3 +49,61 @@ async def get_law(
     if not law:
         raise HTTPException(status_code=404, detail="Legislative act not found")
     return LawDetail.model_validate(law)
+
+
+@router.post("/{law_id}/translate", response_model=TranslationResponse)
+@limiter.limit("10/minute")
+async def translate_law_endpoint(
+    request: Request,  # noqa: ARG001 — required by slowapi
+    law_id: uuid.UUID,
+    force: bool = Query(False, description="Re-translate even if already translated"),
+    db: AsyncSession = Depends(get_db),
+) -> TranslationResponse:
+    """Translate a legislative act to plain Italian via local LLM.
+
+    Returns cached translation if available (use force=true to re-translate).
+    Returns 503 if Ollama is not available.
+    """
+    from codicecivico.nlp.translator import translate_law
+
+    result = await db.execute(select(LegislativeAct).where(LegislativeAct.id == law_id))
+    law = result.scalar_one_or_none()
+    if not law:
+        raise HTTPException(status_code=404, detail="Legislative act not found")
+
+    # Return cached translation if available
+    if law.plain_translation and not force:
+        return TranslationResponse(
+            law_id=law.id,
+            title=law.title,
+            translation=law.plain_translation,
+            translated_at=law.translated_at,
+            cached=True,
+        )
+
+    if not law.full_text:
+        raise HTTPException(
+            status_code=422,
+            detail="Legislative act has no full text to translate",
+        )
+
+    translation = await translate_law(law.full_text)
+    if translation is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Translation service unavailable (Ollama not running)",
+        )
+
+    # Persist translation
+    law.plain_translation = translation
+    law.translated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(law)
+
+    return TranslationResponse(
+        law_id=law.id,
+        title=law.title,
+        translation=translation,
+        translated_at=law.translated_at,
+        cached=False,
+    )

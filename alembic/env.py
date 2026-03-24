@@ -1,5 +1,6 @@
 """Alembic environment configuration for async SQLAlchemy."""
 
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -13,6 +14,11 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+
+# Override sqlalchemy.url from CC_DATABASE_URL env var (for Docker compatibility)
+db_url = os.environ.get("CC_DATABASE_URL")
+if db_url:
+    config.set_main_option("sqlalchemy.url", db_url)
 
 
 def run_migrations_offline() -> None:

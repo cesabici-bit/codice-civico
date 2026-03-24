@@ -1,10 +1,10 @@
 # Status — Codice Civico
 
 ## Fase Corrente
-F5 Justice Map — COMPLETED | F4 NLP Promise Tracker — COMPLETED | F3 Anomaly Detection — COMPLETED | F2 Ingestion — COMPLETED
+F8 Deploy Produzione + Ingest Dati Reali — IN PROGRESS | F7 Legislative Translator — COMPLETED | F6 Frontend + README — COMPLETED | F5 Justice Map — COMPLETED | F4 NLP Promise Tracker — COMPLETED | F3 Anomaly Detection — COMPLETED | F2 Ingestion — COMPLETED
 
 ## Ultimo Subtask Completato
-ST-5.6: CLI + Tests L1-L3 (163 test verdi totali)
+ST-8.11: Rate limiting (slowapi) — Batch 1+2+3 code changes complete, 199 test verdi
 
 ## Subtask Completati F2
 - ST-2.3: Base ingestor enhancements (SPARQL helper con retry/timeout/logging, pagination, ingestion log)
@@ -38,8 +38,44 @@ ST-5.6: CLI + Tests L1-L3 (163 test verdi totali)
 - ST-5.5: API rankings (GET /courts/rankings) + national stats (GET /courts/stats/national)
 - ST-5.6: CLI `ingest --source giustizia` + full suite 163 test verdi
 
+## Subtask Completati F6 (README + Frontend)
+- ST-R.1: README professionale (da 14 righe a ~230 righe: badges, 5 features, architettura, API reference, quick start, testing, roadmap)
+- ST-F6.1: Next.js 15 scaffolding (package.json, tsconfig, next.config standalone, Tailwind 4 CSS-based)
+- ST-F6.2: lib/types.ts (mirror esatto di schemas.py), lib/api.ts (server-side fetch wrapper tipizzato), lib/utils.ts, lib/constants.ts
+- ST-F6.3: Layout (Navbar con Cmd+K search modal, Footer, ThemeToggle dark/light)
+- ST-F6.4: Dashboard homepage (hero, 4 stat cards, 4 section cards con icone, top anomalie table, ultime leggi)
+- ST-F6.5: /politici (FilterBar: nome/camera/regione + DataTable) + /politici/[id] dossier (ScoreGauge coerenza, PromiseBreakdown donut, AssetTimeline bar chart, voti, appalti collegati, leggi)
+- ST-F6.6: /appalti (tabella con RiskBadge) + /appalti/anomalie (card grid) + /appalti/[id] (dettaglio + AnomalyFlagList con severity)
+- ST-F6.7: /giustizia (ItalyMap react-leaflet con CircleMarker + MetricSelector 5 metriche + rankings table) + /giustizia/[id] (CourtTrend line chart)
+- ST-F6.8: /leggi (lista + filtri) + /leggi/[id] (traduzione AI formatted + testo integrale) + /cerca (risultati raggruppati per entity_type)
+- ST-F6.9: Dockerfile multi-stage (Node 22 alpine, standalone), docker-compose.yml aggiornato con frontend service
+- Build green: 11 route, 0 errori TS, First Load JS 102-210KB
+
+## Subtask Completati F7 (Legislative Translator)
+- ST-7.1: translator.py — Ollama HTTP client (httpx), _build_prompt, _parse_llm_response, split_into_articles, translate_article, translate_law, check_ollama_available. Graceful fallback when Ollama unavailable.
+- ST-7.2: API endpoint POST /laws/{id}/translate — triggers translation, caches result in DB, returns 503 if Ollama down. force=true per ri-tradurre.
+- ST-7.3: CLI `translate --law-id --force --max-articles` — full implementation with JSON output
+- ST-7.4: 36 test (L1 unit prompt/parse/split/translate, L2 SOURCE Normattiva D.L. 34/2019, L3 Hypothesis property-based). 199 test verdi totali.
+
+## Subtask Completati F8 (Deploy + Ingest Reale)
+- ST-8.1: Dockerfile.backend multi-stage (builder + runtime, non-root appuser, no dev deps, spaCy model, healthcheck)
+- ST-8.2: Alembic initial migration (15 tabelle, pg_trgm/pgvector/uuid-ossp extensions, 143 tribunali seed)
+- ST-8.4: Caddyfile (reverse proxy, security headers, gzip, access log)
+- ST-8.5: .env.example + config.py (log_level, scheduler_enabled default false) + .gitignore updates
+- ST-8.3: docker-compose.prod.yml (5 servizi: postgres pgvector, backend, frontend, ollama, caddy; memory limits, healthchecks, log rotation)
+- ST-8.6: APScheduler (6 job cron: camera/senato/entity-resolve/nlp daily, anac/giustizia monthly; integrated in app.py lifespan)
+- ST-8.7: /health/detailed endpoint (DB, Ollama, disk, scheduler checks)
+- ST-8.11: Rate limiting (slowapi: 60/min general, 10/min translate; shared ratelimit.py module)
+- ST-8.8: scripts/ingest-full.sh (pipeline ordinata con error handling e logging)
+- ST-8.9: scripts/backup-pg.sh (pg_dump compresso, retention 7 giorni)
+- ST-8.10: scripts/deploy-vps.sh (Ubuntu 24.04: Docker, ufw, fail2ban, clone, build, migrate, Ollama pull, backup cron)
+
 ## Prossimo Subtask
-F6: Legislative Translator (Ollama LLaMAntino) — attendere direzione utente
+VPS provisioning manuale (utente) → deploy → ingest dati reali → verifica
+
+## Log Sessioni
+- 2026-03-24: F7 Legislative Translator — translator.py (Ollama client + graceful fallback), API POST /laws/{id}/translate, CLI translate, 36 test (L1/L2/L3). 199 test verdi totali. mypy + ruff clean.
+- 2026-03-24: F8 Deploy — All 11 subtask completati. Dockerfile multi-stage, Alembic migration (15 tabelle + seed), docker-compose.prod.yml (5 servizi), Caddyfile, APScheduler (6 job), /health/detailed, slowapi rate limiting, 3 script operativi (ingest-full, backup-pg, deploy-vps). Corretto branding da "Genius Lab" a "cesabici-bit". 199 test verdi, ruff clean.
 
 ## Blockers
 - `make` non disponibile su Windows — usare comandi diretti (mypy, ruff, pytest)
@@ -55,6 +91,7 @@ F6: Legislative Translator (Ollama LLaMAntino) — attendere direzione utente
 - 2026-03-23: F3 anomaly detection — 7 rules, IsolationForest (7 features), composite scorer (0-100). 76 test verdi totali.
 - 2026-03-23: F4 NLP Promise Tracker — sentence split, claim detection (14 patterns), topic classification (13 topic), specificity scoring, promise-legislation matching (sentence-transformers). 139 test verdi totali.
 - 2026-03-23: F5 Justice Map — GiustiziaIngestor (Excel parse), 143 tribunali seed, clearance rate/disposition time computation, API rankings + national stats. 163 test verdi totali.
+- 2026-03-24: F6 README professionale + Frontend Next.js 15. 30+ file frontend: 11 route (italiano per SEO), Tailwind 4 dark/light, Recharts (donut/bar/line), react-leaflet (mappa Italia), Cmd+K search modal. Build green, verificato visivamente con Playwright. Dockerfile + docker-compose aggiornato.
 
 ## File Modificati F4
 - src/codicecivico/nlp/ner.py: split_sentences (spaCy + regex fallback), extract_entities

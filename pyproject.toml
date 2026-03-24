@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
 authors = [
-    { name = "Genius Lab" },
+    { name = "cesabici-bit" },
 ]
 keywords = ["civic-tech", "transparency", "politics", "procurement", "nlp", "italy"]
 classifiers = [
@@ -40,6 +40,7 @@ dependencies = [
     "pdfplumber>=0.11",
     "APScheduler>=3.11",
     "openpyxl>=3.1",
+    "slowapi>=0.1.9",
 ]
 
 [project.optional-dependencies]
@@ -62,8 +63,8 @@ dev = [
 codicecivico = "codicecivico.cli.main:cli"
 
 [project.urls]
-Homepage = "https://github.com/genius-lab/codice-civico"
-Documentation = "https://github.com/genius-lab/codice-civico#readme"
+Homepage = "https://github.com/cesabici-bit/codice-civico"
+Documentation = "https://github.com/cesabici-bit/codice-civico#readme"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/codicecivico"]

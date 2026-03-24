@@ -39,3 +39,15 @@ pgdata/
 *.pkl
 *.joblib
 models/
+
+# Production data / backups
+backups/
+data/logs/
+
+# Caddy
+caddy_data/
+caddy_config/
+
+# Next.js build output
+web/.next/
+web/node_modules/

@@ -29,7 +29,10 @@ class Settings(BaseSettings):
     ollama_model: str = "llama3.1"  # or LLaMAntino when available
 
     # Scheduler
-    scheduler_enabled: bool = True
+    scheduler_enabled: bool = False
+
+    # Logging
+    log_level: str = "INFO"
 
 
 settings = Settings()

@@ -1,0 +1,135 @@
+# ==============================================================================
+# Codice Civico — Production Docker Compose
+# ==============================================================================
+
+services:
+  # --- PostgreSQL 16 with pgvector ---
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-codicecivico}
+      POSTGRES_USER: ${POSTGRES_USER:-codicecivico}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-codicecivico} -d ${POSTGRES_DB:-codicecivico}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # --- FastAPI Backend ---
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    env_file: .env
+    environment:
+      CC_DATABASE_URL: ${CC_DATABASE_URL:?Set CC_DATABASE_URL in .env}
+      CC_OLLAMA_URL: http://ollama:11434
+      CC_SCHEDULER_ENABLED: ${CC_SCHEDULER_ENABLED:-true}
+      CC_LOG_LEVEL: ${CC_LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - backend_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # --- Next.js Frontend ---
+  frontend:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    environment:
+      API_URL: http://backend:8000
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # --- Ollama (CPU-only LLM) ---
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 8192M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # --- Caddy Reverse Proxy ---
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+      - backend
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  pgdata:
+  ollama_data:
+  caddy_data:
+  caddy_config:
+  backend_data:

@@ -1,0 +1,36 @@
+# Codice Civico — Caddy Reverse Proxy
+#
+# Per attivare HTTPS: sostituire ":80" con il dominio (es. codicecivico.it)
+# Caddy provvederà automaticamente al certificato Let's Encrypt.
+
+:80 {
+    # API backend
+    handle /api/* {
+        reverse_proxy backend:8000
+    }
+
+    # Frontend (Next.js)
+    handle {
+        reverse_proxy frontend:3000
+    }
+
+    # Security headers
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        X-XSS-Protection "1; mode=block"
+        -Server
+    }
+
+    # Compression
+    encode gzip zstd
+
+    # Access log
+    log {
+        output file /var/log/caddy/access.log {
+            roll_size 10mb
+            roll_keep 3
+        }
+    }
+}
