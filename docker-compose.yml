@@ -27,14 +27,15 @@ services:
       postgres:
         condition: service_healthy
 
-  # Uncomment when frontend is ready (F6)
-  # frontend:
-  #   build:
-  #     context: ./web
-  #   ports:
-  #     - "3000:3000"
-  #   depends_on:
-  #     - backend
+  frontend:
+    build:
+      context: ./web
+    environment:
+      API_URL: http://backend:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
 
   # Uncomment for production with HTTPS
   # caddy:
