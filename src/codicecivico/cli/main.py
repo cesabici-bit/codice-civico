@@ -112,10 +112,65 @@ def train(model: str) -> None:
 
 
 @cli.command()
-@click.option("--law-id", required=True)
-def translate(law_id: str) -> None:
-    """Translate a legislative act to plain Italian."""
-    click.echo(f"Translation for law {law_id} not yet implemented.")
+@click.option("--law-id", required=True, help="UUID of the legislative act to translate.")
+@click.option("--force", is_flag=True, help="Re-translate even if already translated.")
+@click.option("--max-articles", type=int, default=None, help="Max articles to translate.")
+def translate(law_id: str, force: bool, max_articles: int | None) -> None:
+    """Translate a legislative act to plain Italian via local LLM (Ollama)."""
+    import json
+    import uuid as uuid_mod
+
+    from sqlalchemy import select
+
+    from codicecivico.models import LegislativeAct
+    from codicecivico.nlp.translator import translate_law
+
+    try:
+        law_uuid = uuid_mod.UUID(law_id)
+    except ValueError:
+        click.echo(f"Error: '{law_id}' is not a valid UUID.", err=True)
+        raise SystemExit(1)
+
+    async def _run() -> dict | None:
+        async with async_session() as session:
+            result = await session.execute(
+                select(LegislativeAct).where(LegislativeAct.id == law_uuid),
+            )
+            law = result.scalar_one_or_none()
+            if law is None:
+                click.echo(f"Error: law {law_id} not found.", err=True)
+                raise SystemExit(1)
+
+            if law.plain_translation and not force:
+                click.echo("Law already translated (use --force to re-translate).")
+                return law.plain_translation  # type: ignore[return-value]
+
+            if not law.full_text:
+                click.echo("Error: law has no full text to translate.", err=True)
+                raise SystemExit(1)
+
+            translation = await translate_law(
+                law.full_text,
+                max_articles=max_articles,
+            )
+            if translation is None:
+                click.echo(
+                    "Error: Ollama not available. Start it with 'ollama serve'.",
+                    err=True,
+                )
+                raise SystemExit(1)
+
+            # Persist
+            from datetime import datetime, timezone
+
+            law.plain_translation = translation
+            law.translated_at = datetime.now(timezone.utc)
+            await session.commit()
+            return translation  # type: ignore[return-value]
+
+    result = _run_async(_run())
+    if result:
+        click.echo(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":
