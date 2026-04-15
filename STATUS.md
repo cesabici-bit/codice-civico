@@ -4,7 +4,7 @@
 F8 Deploy Produzione + Ingest Dati Reali — IN PROGRESS | F7 Legislative Translator — COMPLETED | F6 Frontend + README — COMPLETED | F5 Justice Map — COMPLETED | F4 NLP Promise Tracker — COMPLETED | F3 Anomaly Detection — COMPLETED | F2 Ingestion — COMPLETED
 
 ## Ultimo Subtask Completato
-ST-8.11: Rate limiting (slowapi) — Batch 1+2+3 code changes complete, 199 test verdi
+ST-8.12: Pre-deploy verification — real data source testing, critical fixes, 199 test verdi
 
 ## Subtask Completati F2
 - ST-2.3: Base ingestor enhancements (SPARQL helper con retry/timeout/logging, pagination, ingestion log)
@@ -69,19 +69,21 @@ ST-8.11: Rate limiting (slowapi) — Batch 1+2+3 code changes complete, 199 test
 - ST-8.8: scripts/ingest-full.sh (pipeline ordinata con error handling e logging)
 - ST-8.9: scripts/backup-pg.sh (pg_dump compresso, retention 7 giorni)
 - ST-8.10: scripts/deploy-vps.sh (Ubuntu 24.04: Docker, ufw, fail2ban, clone, build, migrate, Ollama pull, backup cron)
+- ST-8.12: Pre-deploy verification — tested all 4 data sources live, fixed Giustizia URL (404), fixed Excel parser (new format), fixed Ollama model name, improved ANAC ingest (historical + 6-month window)
 
 ## Prossimo Subtask
-VPS provisioning manuale (utente) → deploy → ingest dati reali → verifica
+VPS provisioning manuale (utente) → push fix → deploy → ingest dati reali → verifica
 
 ## Log Sessioni
 - 2026-03-24: F7 Legislative Translator — translator.py (Ollama client + graceful fallback), API POST /laws/{id}/translate, CLI translate, 36 test (L1/L2/L3). 199 test verdi totali. mypy + ruff clean.
 - 2026-03-24: F8 Deploy — All 11 subtask completati. Dockerfile multi-stage, Alembic migration (15 tabelle + seed), docker-compose.prod.yml (5 servizi), Caddyfile, APScheduler (6 job), /health/detailed, slowapi rate limiting, 3 script operativi (ingest-full, backup-pg, deploy-vps). Corretto branding da "Genius Lab" a "cesabici-bit". 199 test verdi, ruff clean.
+- 2026-04-13: Pre-deploy verification. Tested all real data sources: Camera SPARQL OK (254+ deputati), Senato SPARQL OK (254 senatori), ANAC CIG OK (112K rows/mese), Giustizia Excel FIXED (URL changed from /resources/ to /cmsresources/cms/documents/, filename without dashes, new sheet/header structure). Fixed parser to auto-detect sheet ('data'), auto-detect header row, aggregate granular per-materia data by (tribunal,year). Fixed Ollama model (swap/LLaMAntino non esiste su Ollama → llama3.1). Improved ANAC ingest: 6-month window + ANAC_FROM_YEAR per historical. 199 test verdi.
 
 ## Blockers
 - `make` non disponibile su Windows — usare comandi diretti (mypy, ruff, pytest)
 - Votazioni individuali (singolo deputato->voto) richiedono query SPARQL su `ocd:voto` (57M record) — rimandato a fase successiva
-- Aggiudicatari ANAC: nomi colonne esatti da confermare su primo download reale (ragione_sociale/codice_fiscale)
-- 4 errori mypy pre-esistenti in stub ingestor (openpolis, giustizia, csm, assets) — firma incompatibile con BaseIngestor
+- ANAC 2026 data non ancora pubblicati — ultimo mese disponibile: 2025-12
+- 3 errori mypy pre-esistenti in stub ingestor (openpolis, csm, assets) — firma incompatibile con BaseIngestor
 
 ## Log Sessioni
 - 2026-03-23: F0 completata (ricerca + architettura). Piano approvato.

@@ -42,12 +42,30 @@ run_step "Senato SPARQL ingest" codicecivico ingest --source senato
 # 3. Entity resolution (cross-chamber dedup)
 run_step "Entity resolution" codicecivico entity-resolve
 
-# 4. ANAC procurement (last 3 months)
-for offset in 3 2 1; do
-    YEAR=$(date -d "-${offset} months" +%Y 2>/dev/null || date -v-${offset}m +%Y)
-    MONTH=$(date -d "-${offset} months" +%-m 2>/dev/null || date -v-${offset}m +%-m)
-    run_step "ANAC $YEAR-$MONTH" codicecivico ingest --source anac --year "$YEAR" --month "$MONTH"
-done
+# 4. ANAC procurement
+# First run: ingest historical data if ANAC_FROM_YEAR is set (e.g., ANAC_FROM_YEAR=2024)
+# Recurring: ingest last 6 months (broader window to catch late publications)
+if [ -n "${ANAC_FROM_YEAR:-}" ]; then
+    log "ANAC: historical ingest from $ANAC_FROM_YEAR"
+    CURRENT_YEAR=$(date +%Y)
+    CURRENT_MONTH=$(date +%-m)
+    for y in $(seq "$ANAC_FROM_YEAR" "$CURRENT_YEAR"); do
+        END_MONTH=12
+        if [ "$y" -eq "$CURRENT_YEAR" ]; then
+            END_MONTH=$((CURRENT_MONTH - 1))
+            [ "$END_MONTH" -lt 1 ] && continue
+        fi
+        for m in $(seq 1 "$END_MONTH"); do
+            run_step "ANAC $y-$m" codicecivico ingest --source anac --year "$y" --month "$m"
+        done
+    done
+else
+    for offset in 6 5 4 3 2 1; do
+        YEAR=$(date -d "-${offset} months" +%Y 2>/dev/null || date -v-${offset}m +%Y)
+        MONTH=$(date -d "-${offset} months" +%-m 2>/dev/null || date -v-${offset}m +%-m)
+        run_step "ANAC $YEAR-$MONTH" codicecivico ingest --source anac --year "$YEAR" --month "$MONTH"
+    done
+fi
 
 # 5. Giustizia (Min. Giustizia Excel)
 run_step "Giustizia Excel ingest" codicecivico ingest --source giustizia

@@ -2,8 +2,8 @@
 # ==============================================================================
 # Codice Civico — VPS Deploy Script (Ubuntu 24.04)
 #
-# Run as root on a fresh Hetzner CX32 (or similar Ubuntu 24.04 VPS):
-#   curl -fsSL https://raw.githubusercontent.com/cesabici-bit/codice-civico/main/scripts/deploy-vps.sh | bash
+# Run as root on a fresh Ubuntu 24.04 VPS (Hetzner CX22 or larger):
+#   curl -fsSL https://raw.githubusercontent.com/cesabici-bit/codice-civico/master/scripts/deploy-vps.sh | bash
 #
 # Or clone first, then:
 #   sudo bash scripts/deploy-vps.sh
@@ -98,7 +98,7 @@ echo "Migrations applied."
 echo "=== 9/9 Pull Ollama model ==="
 echo "This may take 10-20 minutes on first run..."
 docker compose -f docker-compose.prod.yml exec -T ollama \
-    ollama pull swap/LLaMAntino-3-ANITA-8B-Inst-DPO-ITA-GGUF || \
+    ollama pull llama3.1 || \
     echo "WARNING: Ollama model pull failed. Translation will use fallback mode."
 
 # --- Setup backup cron ---

@@ -31,10 +31,12 @@ from codicecivico.models import CourtStat, Tribunal
 
 logger = logging.getLogger(__name__)
 
-# Known Excel download URLs (verified 2026-03-23)
+# Known Excel download URLs (verified 2026-04-13)
+# NOTE: Min. Giustizia moved files from /resources/ to /cmsresources/cms/documents/
+# and removed dashes from filename (CivileFlussi2014-2024 -> CivileFlussi20142024)
 FLUSSI_CIVILE_URL = (
-    "https://datiestatistiche.giustizia.it/resources/"
-    "CivileFlussi2014-2024.xlsx"
+    "https://datiestatistiche.giustizia.it/cmsresources/cms/documents/"
+    "CivileFlussi20142024.xlsx"
 )
 
 HTTP_TIMEOUT = 120.0  # seconds — Excel files can be large
@@ -46,19 +48,22 @@ _HEADERS = {
     ),
 }
 
-# Column name variants (the Excel structure may vary)
+# Column name variants (the Excel structure may vary across years)
 _COL_ALIASES: dict[str, list[str]] = {
     "district": ["Distretto", "distretto", "DISTRETTO", "Corte di Appello"],
     "tribunal": [
+        "Sede", "sede", "SEDE",  # 2024+ format
         "Circondario", "circondario", "CIRCONDARIO",
         "Tribunale", "tribunale", "TRIBUNALE", "Ufficio",
     ],
     "year": ["Anno", "anno", "ANNO", "Periodo"],
     "incoming": [
+        "Sopravvenuti", "sopravvenuti", "SOPRAVVENUTI",  # 2024+ format
         "Iscritti", "iscritti", "ISCRITTI",
-        "Sopravvenuti", "sopravvenuti", "Nuovi iscritti",
+        "Nuovi iscritti",
     ],
     "resolved": [
+        "Definiti - totale", "Definiti- totale",  # 2024+ format (with space variants)
         "Definiti", "definiti", "DEFINITI",
         "Esauriti", "esauriti",
     ],
@@ -195,48 +200,84 @@ def _safe_year(value: Any) -> int | None:
     return None
 
 
+def _select_worksheet(
+    wb: Any,
+    sheet_name: str | None,
+) -> Any:
+    """Select the best worksheet: explicit name > 'data' > active."""
+    if sheet_name:
+        return wb[sheet_name]
+    if "data" in wb.sheetnames:
+        return wb["data"]
+    ws = wb.active
+    if ws is None:
+        msg = "No active worksheet found"
+        raise ValueError(msg)
+    return ws
+
+
+def _find_header_row(
+    rows: list[tuple[Any, ...]],
+    hint: int | None = None,
+) -> int:
+    """Find the 1-based header row index by trying column resolution.
+
+    If hint is given, tries that row first. Otherwise scans rows 1-10.
+    """
+    candidates = [hint] if hint else list(range(1, min(11, len(rows) + 1)))
+    for idx in candidates:
+        try:
+            _resolve_columns(rows[idx - 1])
+            return idx
+        except ValueError:
+            continue
+    msg = f"Could not find valid header row in first {len(candidates)} rows"
+    raise ValueError(msg)
+
+
 def parse_excel(
     file_content: bytes,
     *,
     sheet_name: str | None = None,
     case_category: str = "civile",
-    header_row_idx: int = 3,
+    header_row_idx: int | None = None,
 ) -> list[CourtRecord]:
     """Parse a Ministero Giustizia Excel file into CourtRecord list.
 
+    Handles both the old format (aggregated, header at row 3) and the
+    new 2024+ format (granular per-materia on 'data' sheet, header at row 1).
+    Granular data is automatically aggregated by (tribunal, year).
+
     Args:
         file_content: Raw bytes of the .xlsx file.
-        sheet_name: Worksheet name (None = first/active sheet).
+        sheet_name: Worksheet name (None = auto-detect: 'data' > active).
         case_category: Category label for these records.
-        header_row_idx: 1-based row number containing column headers.
+        header_row_idx: 1-based header row (None = auto-detect).
 
     Returns:
         List of CourtRecord, one per tribunal/year combination.
     """
     wb = load_workbook(io.BytesIO(file_content), read_only=True, data_only=True)
-    if sheet_name:
-        ws = wb[sheet_name]
-    else:
-        ws = wb.active  # type: ignore[assignment]
-    if ws is None:
-        msg = "No active worksheet found"
-        raise ValueError(msg)
+    ws = _select_worksheet(wb, sheet_name)
 
     rows = list(ws.iter_rows(values_only=True))
     wb.close()
 
-    if len(rows) < header_row_idx:
-        msg = f"Excel has only {len(rows)} rows, expected header at row {header_row_idx}"
+    if not rows:
+        msg = "Excel file has no rows"
         raise ValueError(msg)
 
-    header = rows[header_row_idx - 1]
+    header_idx = _find_header_row(rows, hint=header_row_idx)
+    header = rows[header_idx - 1]
     col_map = _resolve_columns(header)
 
-    records: list[CourtRecord] = []
-    for row in rows[header_row_idx:]:
+    # Accumulate per (tribunal, year) for aggregation
+    agg: dict[tuple[str, str, int], list[int]] = {}  # key -> [incoming, resolved, pending]
+
+    skip_vals = ("", "-", "Totale", "TOTALE", "None")
+    for row in rows[header_idx:]:
         trib_idx = col_map.get("tribunal")
         tribunal_name_raw = row[trib_idx] if trib_idx is not None else None
-        skip_vals = ("", "-", "Totale", "TOTALE")
         if not tribunal_name_raw or str(tribunal_name_raw).strip() in skip_vals:
             continue
 
@@ -250,17 +291,31 @@ def parse_excel(
         resolved = _safe_int(row[col_map["resolved"]])
         pending = _safe_int(row[col_map["pending"]])
 
-        records.append(CourtRecord(
-            tribunal_name=tribunal_name,
-            district=district,
-            year=year,
-            case_category=case_category,
-            incoming=incoming,
-            resolved=resolved,
-            pending=pending,
-        ))
+        key = (tribunal_name, district, year)
+        if key in agg:
+            agg[key][0] += incoming
+            agg[key][1] += resolved
+            agg[key][2] += pending
+        else:
+            agg[key] = [incoming, resolved, pending]
 
-    logger.info("Parsed %d court records from Excel.", len(records))
+    records = [
+        CourtRecord(
+            tribunal_name=trib,
+            district=dist,
+            year=yr,
+            case_category=case_category,
+            incoming=vals[0],
+            resolved=vals[1],
+            pending=vals[2],
+        )
+        for (trib, dist, yr), vals in agg.items()
+    ]
+
+    logger.info(
+        "Parsed %d court records from Excel (%d raw rows aggregated).",
+        len(records), len(rows) - 1,
+    )
     return records
 
 
@@ -389,12 +444,13 @@ class GiustiziaIngestor(BaseIngestor):
             if local_file:
                 file_content = Path(local_file).read_bytes()
             else:
-                file_content = await download_excel(
-                    f"{settings.giustizia_stats_url}/resources/CivileFlussi2014-2024.xlsx"
-                )
+                # Try the known URL first, then fallback with legacy path
+                file_content = await download_excel(FLUSSI_CIVILE_URL)
                 if file_content is None:
-                    # Fallback to known URL
-                    file_content = await download_excel(FLUSSI_CIVILE_URL)
+                    # Fallback: try legacy path structure (pre-2026)
+                    file_content = await download_excel(
+                        f"{settings.giustizia_stats_url}/resources/CivileFlussi2014-2024.xlsx"
+                    )
 
                 if file_content is None:
                     errors["download"] = "Failed to download justice statistics Excel"

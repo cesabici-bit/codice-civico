@@ -26,7 +26,7 @@ class Settings(BaseSettings):
 
     # NLP / Ollama
     ollama_url: str = "http://localhost:11434"
-    ollama_model: str = "llama3.1"  # or LLaMAntino when available
+    ollama_model: str = "llama3.1"
 
     # Scheduler
     scheduler_enabled: bool = False
