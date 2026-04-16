@@ -15,6 +15,13 @@ COPY pyproject.toml .
 COPY README.md .
 COPY src/ src/
 
+# Install torch CPU-only first — avoids pulling ~2 GB of CUDA libs
+# that are useless on a CPU VPS (CX22). sentence-transformers then
+# finds torch already installed and skips its default (GPU) build.
+RUN pip install --no-cache-dir --prefix=/install \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
+    "torch>=2.0,<3.0"
+
 # Install production deps (core + nlp, no dev)
 RUN pip install --no-cache-dir --prefix=/install ".[nlp]"
 
