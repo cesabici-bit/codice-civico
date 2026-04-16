@@ -107,7 +107,9 @@ class BaseIngestor(ABC):
         page = 0
 
         while True:
-            query = query_template.format(limit=page_size, offset=offset)
+            query = query_template.replace("{limit}", str(page_size)).replace(
+                "{offset}", str(offset)
+            )
             rows = BaseIngestor._sparql_query(endpoint, query)
             all_rows.extend(rows)
 
