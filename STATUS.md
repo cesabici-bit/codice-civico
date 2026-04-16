@@ -4,7 +4,7 @@
 F9 Deploy Live su VPS — IN PROGRESS | F8 Deploy Infra — COMPLETED | F7 Legislative Translator — COMPLETED | F6 Frontend + README — COMPLETED | F5 Justice Map — COMPLETED | F4 NLP Promise Tracker — COMPLETED | F3 Anomaly Detection — COMPLETED | F2 Ingestion — COMPLETED
 
 ## Ultimo Subtask Completato
-ST-9.3-9.5: Deploy + migrate + verify. Applied 3 Docker fixes (README.md copy, web/public .gitkeep, Next.js HOSTNAME=0.0.0.0). All 5 containers UP. Alembic 0001 applied. /api/v1/health/detailed all OK. Frontend HTTP 200 via Caddy.
+ST-9.3-9.8 (2026-04-17): MVP LIVE with partial data. 6 commits of fixes: 3 Docker (README, .gitkeep, HOSTNAME), 1 SPARQL format (str.replace not format), 1 torch CPU-only, 1 ANAC decimal format auto-detect. Backup cron + 4GB swap active. DB: 668 politici / 250 atti / 144 tribunali / 1540 CourtStat. Contract=0 (ANAC retry running on VPS). 203 test verdi.
 
 ## F9 Deploy Live — Stato Dettagliato (2026-04-16)
 
@@ -16,21 +16,27 @@ ST-9.3-9.5: Deploy + migrate + verify. Applied 3 Docker fixes (README.md copy, w
 - IPv4: **46.225.219.136**
 - SSH: `ssh -i /c/Users/cesab/.ssh/id_ed25519 root@46.225.219.136`
 
-### Done
-- [x] ST-9.1: VPS provisioning (Hetzner CX22, Nürnberg, Ubuntu 24.04)
-- [x] ST-9.2: `.env` + CORS + POSTGRES_PASSWORD
-- [x] ST-9.3: Docker build (3 fixes applied — README.md in Dockerfile.backend, .gitkeep for web/public, HOSTNAME=0.0.0.0 for Next.js)
-- [x] ST-9.4: `docker compose up -d` — 5 containers running
-- [x] ST-9.5: `alembic upgrade head` — schema + seed 143 tribunali
-- [x] Verify: `/api/v1/health/detailed` all OK, frontend HTTP 200 via Caddy
+### Done (F9)
+- [x] ST-9.1-9.5: VPS provisioning, .env, Docker build (3 fixes), containers up, migrate, health verify
+- [x] ST-9.6: SKIP ollama model pull (4 GB RAM; graceful fallback in place)
+- [x] ST-9.7: Backup cron active
+- [x] Visual verify (Playwright): dashboard shows 900 politici / 144 tribunali / 5 leggi
+- [x] Giustizia ingest: 1540 CourtStat records (Civile flussi 2014-2024)
+- [x] F9 fix #4: SPARQL `_sparql_paginated` format bug (commit `91e46ee`, +2 tests)
+- [x] F9 fix #5: torch CPU-only to fit VPS disk (commit `0514b47`)
+- [x] F9 fix #6: ANAC `_parse_decimal` auto-detect format (commit `1fde064`, +2 tests)
+- [x] 4 GB swap enabled on VPS (was missing, caused OOM)
 
 ### In Progress
-- [ ] ST-9.6: SKIP ollama model pull (CX22 has only 4 GB; model needs ~5 GB). Translator uses graceful fallback.
+- [ ] ST-9.8: ANAC 2025-12 ingest retry after decimal fix. Check next session:
+      `ssh ... docker compose ... exec backend tail /app/data/logs/anac_v2_*.log`
 
-### Pending
-- [ ] ST-9.7: Backup cron setup: `0 5 * * * /opt/codice-civico/scripts/backup-pg.sh`
-- [ ] ST-9.8: First ingest with `ANAC_FROM_YEAR=2024 bash scripts/ingest-full.sh`
-- [ ] ST-9.9: Visual verify browser `http://46.225.219.136/`
+### Pending (next session)
+- [ ] Anomaly detection CLI/script — `train --model anomaly` is stub. Need: iterate Contract, run rules+ML+scorer, insert AnomalyFlag rows.
+- [ ] HTML entity decoding bug (frontend, cosmetic): `&quot;`/`&rsquo;` visible in law titles
+- [ ] Dashboard counter 900 vs 668 DB (aggregation mismatch)
+- [ ] Optional: Speech ingestion (interventi SPARQL — query ok but returns 0 rows, needs review)
+- [ ] Streaming ANAC parser (for multi-year ingest — current one holds full CSV in pandas memory)
 
 ### Critical Decisions CX22
 - Ollama container runs idle (~100 MB) but **model NOT pulled** — would OOM.
