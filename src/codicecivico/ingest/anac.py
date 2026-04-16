@@ -69,12 +69,32 @@ def _parse_date_anac(raw: str) -> date | None:
 
 
 def _parse_decimal(raw: str) -> Decimal | None:
-    """Parse an amount string to Decimal, handling commas."""
+    """Parse an amount string to Decimal, auto-detecting italian vs english format.
+
+    - "1234567.89"    -> 1234567.89 (english, dot = decimal)
+    - "1234567,89"    -> 1234567.89 (italian, comma = decimal)
+    - "1.234.567,89"  -> 1234567.89 (italian: dots = thousands, comma = decimal)
+    - "1,234,567.89"  -> 1234567.89 (english: commas = thousands, dot = decimal)
+
+    The last separator wins as the decimal mark when both are present.
+    ANAC open-data CSVs use the english convention; older government
+    Excel exports use the italian one. Robust to both.
+    """
     if not raw or not raw.strip():
         return None
     try:
-        # Italian CSV may use comma as decimal separator
-        cleaned = raw.strip().replace(".", "").replace(",", ".")
+        s = raw.strip()
+        has_dot = "." in s
+        has_comma = "," in s
+        if has_dot and has_comma:
+            if s.rindex(",") > s.rindex("."):
+                cleaned = s.replace(".", "").replace(",", ".")
+            else:
+                cleaned = s.replace(",", "")
+        elif has_comma:
+            cleaned = s.replace(",", ".")
+        else:
+            cleaned = s
         return Decimal(cleaned)
     except (InvalidOperation, ValueError):
         return None

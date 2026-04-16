@@ -51,6 +51,20 @@ class TestParseDecimal:
         assert _parse_decimal("") is None
         assert _parse_decimal("   ") is None
 
+    def test_english_decimal(self) -> None:
+        """ANAC open-data CSV: dot = decimal, no thousands separator.
+
+        Regression: 2026-04-16 production deploy hit numeric overflow
+        because "74936922.41800001" was being parsed as 7493692241800001
+        (100x inflated) — all "." were stripped as thousands separators.
+        """
+        assert _parse_decimal("74936922.41800001") == Decimal("74936922.41800001")
+        assert _parse_decimal("1234567.89") == Decimal("1234567.89")
+
+    def test_english_amount_with_thousands(self) -> None:
+        """English-style: commas for thousands, dot for decimal."""
+        assert _parse_decimal("1,234,567.89") == Decimal("1234567.89")
+
 
 class TestDetectDelimiter:
     def test_semicolon(self) -> None:
