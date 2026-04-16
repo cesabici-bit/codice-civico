@@ -4,7 +4,7 @@
 F9 Deploy Live su VPS — IN PROGRESS | F8 Deploy Infra — COMPLETED | F7 Legislative Translator — COMPLETED | F6 Frontend + README — COMPLETED | F5 Justice Map — COMPLETED | F4 NLP Promise Tracker — COMPLETED | F3 Anomaly Detection — COMPLETED | F2 Ingestion — COMPLETED
 
 ## Ultimo Subtask Completato
-ST-9.2: .env created on VPS. Build FAILED due to missing README.md in Dockerfile context — FIX applied locally, pending commit + push + rebuild.
+ST-9.3-9.5: Deploy + migrate + verify. Applied 3 Docker fixes (README.md copy, web/public .gitkeep, Next.js HOSTNAME=0.0.0.0). All 5 containers UP. Alembic 0001 applied. /api/v1/health/detailed all OK. Frontend HTTP 200 via Caddy.
 
 ## F9 Deploy Live — Stato Dettagliato (2026-04-16)
 
@@ -17,21 +17,20 @@ ST-9.2: .env created on VPS. Build FAILED due to missing README.md in Dockerfile
 - SSH: `ssh -i /c/Users/cesab/.ssh/id_ed25519 root@46.225.219.136`
 
 ### Done
-- [x] ST-9.1: VPS provisioning (Hetzner CX22, Nürnberg, Ubuntu 24.04, SSH key `cesabici-windows`)
-- [x] SSH connection verified
-- [x] `deploy-vps.sh` step 1-6: apt update, Docker install, ufw, fail2ban, repo clone to `/opt/codice-civico`
-- [x] ST-9.2: `.env` created on server with random 32-char POSTGRES_PASSWORD + CORS for IP
+- [x] ST-9.1: VPS provisioning (Hetzner CX22, Nürnberg, Ubuntu 24.04)
+- [x] ST-9.2: `.env` + CORS + POSTGRES_PASSWORD
+- [x] ST-9.3: Docker build (3 fixes applied — README.md in Dockerfile.backend, .gitkeep for web/public, HOSTNAME=0.0.0.0 for Next.js)
+- [x] ST-9.4: `docker compose up -d` — 5 containers running
+- [x] ST-9.5: `alembic upgrade head` — schema + seed 143 tribunali
+- [x] Verify: `/api/v1/health/detailed` all OK, frontend HTTP 200 via Caddy
 
 ### In Progress
-- [ ] ST-9.3: Docker build — FAILED at `pip install .[nlp]` (hatchling: README.md missing). **Fix applied to Dockerfile.backend** (2x `COPY README.md .`), needs commit + push + rebuild.
+- [ ] ST-9.6: SKIP ollama model pull (CX22 has only 4 GB; model needs ~5 GB). Translator uses graceful fallback.
 
 ### Pending
-- [ ] ST-9.4: `docker compose -f docker-compose.prod.yml up -d` (start all containers)
-- [ ] ST-9.5: `alembic upgrade head` (create 15 tables + seed 140 tribunali)
-- [ ] ST-9.6: SKIP ollama model pull (CX22 has only 4 GB; model needs ~5 GB). Translator uses graceful fallback.
 - [ ] ST-9.7: Backup cron setup: `0 5 * * * /opt/codice-civico/scripts/backup-pg.sh`
 - [ ] ST-9.8: First ingest with `ANAC_FROM_YEAR=2024 bash scripts/ingest-full.sh`
-- [ ] ST-9.9: Verify — `curl http://46.225.219.136/api/v1/health`, browser `http://46.225.219.136/`
+- [ ] ST-9.9: Visual verify browser `http://46.225.219.136/`
 
 ### Critical Decisions CX22
 - Ollama container runs idle (~100 MB) but **model NOT pulled** — would OOM.
