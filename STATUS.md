@@ -1,10 +1,42 @@
 # Status — Codice Civico
 
 ## Fase Corrente
-F8 Deploy Produzione + Ingest Dati Reali — IN PROGRESS | F7 Legislative Translator — COMPLETED | F6 Frontend + README — COMPLETED | F5 Justice Map — COMPLETED | F4 NLP Promise Tracker — COMPLETED | F3 Anomaly Detection — COMPLETED | F2 Ingestion — COMPLETED
+F9 Deploy Live su VPS — IN PROGRESS | F8 Deploy Infra — COMPLETED | F7 Legislative Translator — COMPLETED | F6 Frontend + README — COMPLETED | F5 Justice Map — COMPLETED | F4 NLP Promise Tracker — COMPLETED | F3 Anomaly Detection — COMPLETED | F2 Ingestion — COMPLETED
 
 ## Ultimo Subtask Completato
-ST-8.12: Pre-deploy verification — real data source testing, critical fixes, 199 test verdi
+ST-9.2: .env created on VPS. Build FAILED due to missing README.md in Dockerfile context — FIX applied locally, pending commit + push + rebuild.
+
+## F9 Deploy Live — Stato Dettagliato (2026-04-16)
+
+### VPS
+- Provider: Hetzner Cloud, progetto `codice-civico`, server `codice-civico-prod`
+- Type: CX22 (4 GB RAM, 40 GB SSD, 3.85 EUR/mese)
+- Location: Nürnberg
+- OS: Ubuntu 24.04.3 LTS
+- IPv4: **46.225.219.136**
+- SSH: `ssh -i /c/Users/cesab/.ssh/id_ed25519 root@46.225.219.136`
+
+### Done
+- [x] ST-9.1: VPS provisioning (Hetzner CX22, Nürnberg, Ubuntu 24.04, SSH key `cesabici-windows`)
+- [x] SSH connection verified
+- [x] `deploy-vps.sh` step 1-6: apt update, Docker install, ufw, fail2ban, repo clone to `/opt/codice-civico`
+- [x] ST-9.2: `.env` created on server with random 32-char POSTGRES_PASSWORD + CORS for IP
+
+### In Progress
+- [ ] ST-9.3: Docker build — FAILED at `pip install .[nlp]` (hatchling: README.md missing). **Fix applied to Dockerfile.backend** (2x `COPY README.md .`), needs commit + push + rebuild.
+
+### Pending
+- [ ] ST-9.4: `docker compose -f docker-compose.prod.yml up -d` (start all containers)
+- [ ] ST-9.5: `alembic upgrade head` (create 15 tables + seed 140 tribunali)
+- [ ] ST-9.6: SKIP ollama model pull (CX22 has only 4 GB; model needs ~5 GB). Translator uses graceful fallback.
+- [ ] ST-9.7: Backup cron setup: `0 5 * * * /opt/codice-civico/scripts/backup-pg.sh`
+- [ ] ST-9.8: First ingest with `ANAC_FROM_YEAR=2024 bash scripts/ingest-full.sh`
+- [ ] ST-9.9: Verify — `curl http://46.225.219.136/api/v1/health`, browser `http://46.225.219.136/`
+
+### Critical Decisions CX22
+- Ollama container runs idle (~100 MB) but **model NOT pulled** — would OOM.
+- To enable translation: upgrade to CX32 (8 GB) and `docker compose ... exec ollama ollama pull llama3.1`
+- DO NOT re-run `deploy-vps.sh` blindly — it does `git pull --ff-only`, run individual steps instead.
 
 ## Subtask Completati F2
 - ST-2.3: Base ingestor enhancements (SPARQL helper con retry/timeout/logging, pagination, ingestion log)
