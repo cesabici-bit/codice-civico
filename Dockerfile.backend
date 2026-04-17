@@ -16,14 +16,18 @@ COPY README.md .
 COPY src/ src/
 
 # Install torch CPU-only first — avoids pulling ~2 GB of CUDA libs
-# that are useless on a CPU VPS (CX22). sentence-transformers then
-# finds torch already installed and skips its default (GPU) build.
+# that are useless on a CPU VPS (CX22).
 RUN pip install --no-cache-dir --prefix=/install \
     --extra-index-url https://download.pytorch.org/whl/cpu \
     "torch>=2.0,<3.0"
 
-# Install production deps (core + nlp, no dev)
-RUN pip install --no-cache-dir --prefix=/install ".[nlp]"
+# Install production deps (core + nlp, no dev).
+# IMPORTANT: pass --extra-index-url AGAIN so pip preserves the +cpu build
+# when re-resolving torch during .[nlp] install. Without it, pip upgrades
+# to the PyPI GPU variant and the image balloons by ~2 GB of CUDA libs.
+RUN pip install --no-cache-dir --prefix=/install \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
+    ".[nlp]"
 
 # Download spaCy Italian model
 RUN /install/bin/python -m spacy download it_core_news_lg 2>/dev/null || \
