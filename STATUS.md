@@ -1,9 +1,23 @@
 # Status — Codice Civico
 
 ## Fase Corrente
-F9 Deploy Live su VPS — IN PROGRESS | F8 Deploy Infra — COMPLETED | F7 Legislative Translator — COMPLETED | F6 Frontend + README — COMPLETED | F5 Justice Map — COMPLETED | F4 NLP Promise Tracker — COMPLETED | F3 Anomaly Detection — COMPLETED | F2 Ingestion — COMPLETED
+Sprint 1 (F11 Entity Resolution) CHIUSO come non applicabile sui dati attuali (vedi KNOWN_ISSUES EC-015) | F9.5 Anomaly Calibration COMPLETED & DEPLOYED | F9 Deploy Live COMPLETED | F8-F2 COMPLETED
+
+**Prossimo**: Sprint 2 → F10 Graph Layer (tabella relationships + CTE ricorsive + endpoint /graph)
 
 ## Ultimo Subtask Completato
+F9.5 (2026-04-17) — Anomaly Calibration. Committed commits `0defa3d` (codice) + `9098243` (roadmap). Deployed VPS.
+- PRICE_SPIKE: ratio>3x median → z-score su log(amount) per CPV-8 (z>3, min 30 samples)
+- SPLIT_CONTRACTS: fix finestra 90gg reale (era bug), CPV-8 invece di CPV-5, n>=5, filtri A (diversità fornitori >=60% → suppress) + B (cluster >20 → LOW)
+- Endpoint `/api/v1/stats/anomaly-calibration` + pagina `/appalti/calibrazione` per trasparenza
+- 5 test L2 `test_anomaly_calibration.py` con oracoli ANAC/OECD/EU
+- Risultato live: 81.947 → 24.770 flag (-70%), flag rate 48% → 11.6%, high-risk pool 968 → 332
+
+Sprint 1 (F11 Entity Resolution) CHIUSO 2026-04-17:
+- Verifica empirica: fonte terza OpenPolis (api3.openpolis.it) non risponde; codice fiscale non esposto da SPARQL Camera/Senato
+- Pipeline Camera/Senato limitata a legislatura 19 → caso d'uso "cross-legislatura" strutturalmente assente nei dati attuali
+- Debito tecnico registrato come EC-015 in KNOWN_ISSUES.md con trigger espliciti di rivisitazione (ingestione leg. storiche, F15 dossier)
+
 ST-9.11-9.14 (2026-04-17): Production data-quality polish.
 - ST-9.11 Aggiudicatari streaming ingest: new `AnacIngestor.update_suppliers_from_snapshot()` + CLI `anac-suppliers --snapshot YYYYMMDD`. Stream-reads 99MB CSV from within ZIP, batch UPDATE with `supplier_name IS NULL` guard. **146,860 contracts enriched with supplier info** (82% coverage). RAM stayed flat at 1.3GB.
 - ST-9.12 Anomaly re-run with supplier data: **81,947 flags** (vs 81,375 before). REVOLVING_DOOR rule now fires: 572 flags (140 high, 432 medium).
@@ -128,7 +142,30 @@ ST-9.3-9.8 (2026-04-17): MVP LIVE with partial data. 6 commits of fixes: 3 Docke
 - ST-8.12: Pre-deploy verification — tested all 4 data sources live, fixed Giustizia URL (404), fixed Excel parser (new format), fixed Ollama model name, improved ANAC ingest (historical + 6-month window)
 
 ## Prossimo Subtask
-VPS provisioning manuale (utente) → push fix → deploy → ingest dati reali → verifica
+**Sprint 2 — F10 Graph Layer con modello bitemporale**.
+
+**Scoperta architetturale da sessione 2026-04-17**: l'ontologia `dati.camera.it` espone `ocd:mandatoCamera` con `startDate`/`endDate`/`rif_deputato`/`rif_leg` — supporta nativamente il modello a entità temporale. L'URI deputato segue il pattern `deputato.rdf/drNNNN_LL` dove `drNNNN` è persona-stabile tra legislature (verificato live: `dr3325` appare in leg. 16-22). **Nessuna deduplicazione statistica serve per i politici tra legislature: la persona è deterministicamente identificabile dal prefisso URI.**
+
+**Implicazione F10**: ridisegnare schema in modalità bitemporale:
+- Estrarre `person_id` da `drNNNN` (deterministico)
+- Nodi persona stabili; mandati e appartenenze come archi con `valid_from`/`valid_to` obbligatori
+- Ingestione rivolta a `ocd:mandatoCamera` (granulare nel tempo), non a `ocd:deputato` (istantaneo per legislatura)
+- Tabella `relationships` con `valid_from` e `valid_to` NOT NULL come meccanismo M5 esteso
+
+**Residuo Camera↔Senato**: verificare struttura `dati.senato.it` in apertura Sprint 2. Probabilmente identificatore persona separato → servirà link owl:sameAs o fonte terza (Wikidata Q-ID). Problema limitato al confine Camera-Senato, non diffuso.
+
+**Gate PASS originale resta**: traversal 2-hop da politico torna azienda verificabile via source_url cliccabile + tutti primi 20 archi hanno source_url HTTP 200 + constraint M5 rigetta riga senza source_url + query "appartenenza di X al 2023-05-15" risponde deterministicamente.
+
+Input richiesto da utente inizio prossima sessione: nessuno (design chiaro). Azione mia: aggiornare ROADMAP.md con schema bitemporale prima di iniziare implementazione.
+
+**UPDATE 2026-04-17 (sessione successiva)**: ROADMAP.md Sprint 2 riscritto con schema bitemporale completo (`persons` + `mandates` + `party_memberships` + `relationships` con `valid_from` NOT NULL). M5 esteso a temporalità obbligatoria. Sprint 1 F11 marcato CHIUSO/DEFERRED in ROADMAP con trigger di rivisitazione. Gate F10 aggiornato con 6 criteri PASS.
+
+**Prossima azione concreta F10** (ordine):
+1. Web search + test SPARQL: esiste `osr:mandato` su `dati.senato.it` con pattern analogo a `ocd:mandatoCamera`? Qual è il pattern URI senatore?
+2. Scrivere migration Alembic con le 4 tabelle nuove (politicians esistente mantenuta compat).
+3. CHECKPOINT utente pre-migrate: review schema (30 min).
+4. Riscrivere CameraIngestor rivolto a `ocd:mandatoCamera` + regex `dr(\d+)_\d+` per person_id deterministico.
+5. Decisione utente su link Camera↔Senato (solo se identificatori separati emergono dal punto 1).
 
 ## Log Sessioni
 - 2026-03-24: F7 Legislative Translator — translator.py (Ollama client + graceful fallback), API POST /laws/{id}/translate, CLI translate, 36 test (L1/L2/L3). 199 test verdi totali. mypy + ruff clean.

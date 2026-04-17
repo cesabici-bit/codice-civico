@@ -117,8 +117,8 @@
 - **Data**: 2026-04-17
 - **Sintomo**: CLI command prints "not yet implemented". No way to populate `AnomalyFlag` table after ANAC ingest.
 - **Causa**: The anomaly module (`rules.py`, `ml.py`, `scorer.py`) exists and is tested, but no pipeline CLI wires it end-to-end
-- **Fix**: TBD — implement `codicecivico anomaly run` that iterates Contract, applies `check_all_rules`, computes `risk_score`, inserts AnomalyFlag rows
-- **Status**: OPEN (priority: after ANAC data is in)
+- **Fix**: Implemented in F9 (commit `89ad410`): `anomaly/pipeline.py` orchestrates ML training + rule checks + risk scoring; CLI wired. Calibrated in F9.5 (commit `0defa3d`).
+- **Status**: FIXED
 
 ### EC-014: Speech ingestion returns 0 rows
 - **Data**: 2026-04-17
@@ -126,3 +126,29 @@
 - **Causa**: TBD — SPARQL query for `ocd:intervento` may need revision (legislature URI? schema change?)
 - **Fix**: TBD — test QUERY_INTERVENTI directly against dati.camera.it endpoint
 - **Status**: OPEN
+
+### EC-015: Entity resolution politici — deduplicazione cross-legislatura differita
+- **Data**: 2026-04-17
+- **Sintomo**: il deduplicatore `entity/resolver.py` non è mai stato misurato con precision/recall.
+  Lo Sprint 1 pianificato per farlo è stato chiuso come non applicabile sui dati attuali.
+- **Causa**: la pipeline Camera (`_ingest_deputati`, query `ocd:rif_leg <repubblica_19>`) e Senato
+  (`osr:legislatura 19`) limitano l'ingestione alla sola legislatura 19 in corso. Il caso d'uso per
+  la deduplicazione — politico che passa Camera→Senato tra legislature diverse — non è strutturalmente
+  presente nei dati. Il passaggio entro la stessa legislatura è eventualità numerabile sulle dita.
+  Infatti `SELECT COUNT(*) FROM politicians WHERE camera_uri IS NOT NULL AND senato_uri IS NOT NULL`
+  restituisce 0 (coerente con la struttura), non indice di duplicati silenti.
+  Il campo `tax_code_hash` è vuoto per tutti i 668 record: codice fiscale non esposto dalle fonti
+  SPARQL Camera/Senato (verificato empiricamente interrogando i predicati di `ocd:deputato`). OpenPolis
+  API v3 (`api3.openpolis.it`) oggi non risponde — fonte terza non disponibile senza intervento utente.
+- **Fix**: differito. Il problema riemergerà quando:
+  (a) verrà ingerita la legislatura 18 o precedenti → alcuni politici appariranno con camera_uri E
+      senato_uri da periodi diversi, e la funzione `merge_cross_chamber` dovrà lavorare davvero.
+  (b) F10 (grafo) popolerà nodi con dati eterogenei → duplicati emergeranno come cluster simmetrici
+      negli archi, catturabili in ispezione empirica.
+  (c) F15 (dossier narrativi) richiederà dossier unificati → qui la precisione di dedup diventa
+      requisito di UX/fiducia, non tecnico.
+- **Prevenzione**: prima di ingerire legislature storiche, riprendere lo Sprint 1 con protocollo reale
+  (esecuzione `merge_cross_chamber` live + ispezione empirica). Valutare allora se servono fonti terze
+  (Wikidata Q-ID, OpenPolis ripristinato, altre liste autoritative). Sprint F15 NON deve partire con
+  debito aperto.
+- **Status**: DEFERRED (con trigger espliciti di rivisitazione sopra elencati)

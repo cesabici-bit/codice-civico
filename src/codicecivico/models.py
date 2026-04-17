@@ -501,3 +501,183 @@ class IngestionLog(Base):
     records_processed: Mapped[int] = mapped_column(Integer, default=0)
     errors: Mapped[dict | None] = mapped_column(JSONB)
     checkpoint_value: Mapped[str | None] = mapped_column(Text)
+
+
+# ---------------------------------------------------------------------------
+# F10 Graph Layer — bitemporal identity + relationships
+# ---------------------------------------------------------------------------
+
+
+class Person(Base):
+    """Stable identity entity. Source_url lives on person_external_ids (per-ID)."""
+
+    __tablename__ = "persons"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4,
+    )
+    primary_full_name: Mapped[str] = mapped_column(Text, nullable=False)
+    birth_date: Mapped[date | None] = mapped_column(Date)
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False,
+    )
+
+    external_ids: Mapped[list["PersonExternalId"]] = relationship(
+        back_populates="person", cascade="all, delete-orphan",
+    )
+    mandates: Mapped[list["Mandate"]] = relationship(
+        back_populates="person", cascade="all, delete-orphan",
+    )
+    party_memberships: Mapped[list["PartyMembership"]] = relationship(
+        back_populates="person", cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        Index(
+            "idx_persons_full_name_trgm", "primary_full_name",
+            postgresql_using="gin",
+            postgresql_ops={"primary_full_name": "gin_trgm_ops"},
+        ),
+    )
+
+
+class PersonExternalId(Base):
+    """M5: every identity claim carries its own source_url."""
+
+    __tablename__ = "person_external_ids"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4,
+    )
+    person_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("persons.id", ondelete="CASCADE"), nullable=False,
+    )
+    namespace: Mapped[str] = mapped_column(String(32), nullable=False)
+    external_id: Mapped[str] = mapped_column(Text, nullable=False)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    source_checksum: Mapped[str | None] = mapped_column(String(64))
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False,
+    )
+
+    person: Mapped["Person"] = relationship(back_populates="external_ids")
+
+    __table_args__ = (
+        UniqueConstraint("namespace", "external_id", name="uq_person_ext_id"),
+        Index("idx_pei_person", "person_id"),
+        Index("idx_pei_lookup", "namespace", "external_id"),
+    )
+
+
+class Mandate(Base):
+    """Temporal arc: Person -> Camera/Senato parliamentary mandate."""
+
+    __tablename__ = "mandates"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4,
+    )
+    person_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("persons.id", ondelete="CASCADE"), nullable=False,
+    )
+    chamber: Mapped[str] = mapped_column(String(10), nullable=False)
+    legislature: Mapped[int] = mapped_column(Integer, nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date | None] = mapped_column(Date)
+    motivo_termine: Mapped[str | None] = mapped_column(Text)
+    tipo_mandato: Mapped[str | None] = mapped_column(Text)
+    regione_elezione: Mapped[str | None] = mapped_column(Text)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    source_checksum: Mapped[str | None] = mapped_column(String(64))
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False,
+    )
+
+    person: Mapped["Person"] = relationship(back_populates="mandates")
+
+    __table_args__ = (
+        CheckConstraint(
+            "chamber IN ('camera','senato')", name="ck_mandate_chamber",
+        ),
+        CheckConstraint(
+            "end_date IS NULL OR end_date >= start_date",
+            name="ck_mandate_temporal_order",
+        ),
+        UniqueConstraint(
+            "person_id", "chamber", "legislature", "start_date",
+            name="uq_mandate_person_leg",
+        ),
+        Index("idx_mandates_person", "person_id"),
+        Index("idx_mandates_temporal", "start_date", "end_date"),
+    )
+
+
+class PartyMembership(Base):
+    """Temporal arc: Person -> political party / parliamentary group."""
+
+    __tablename__ = "party_memberships"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4,
+    )
+    person_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("persons.id", ondelete="CASCADE"), nullable=False,
+    )
+    party: Mapped[str] = mapped_column(Text, nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date | None] = mapped_column(Date)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    source_checksum: Mapped[str | None] = mapped_column(String(64))
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False,
+    )
+
+    person: Mapped["Person"] = relationship(back_populates="party_memberships")
+
+    __table_args__ = (
+        CheckConstraint(
+            "end_date IS NULL OR end_date >= start_date",
+            name="ck_party_temporal_order",
+        ),
+        Index("idx_party_person", "person_id"),
+        Index("idx_party_temporal", "start_date", "end_date"),
+    )
+
+
+class Relationship(Base):
+    """Polymorphic cross-entity temporal arc. Source/target resolved by type string."""
+
+    __tablename__ = "relationships"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4,
+    )
+    source_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    target_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    valid_from: Mapped[date] = mapped_column(Date, nullable=False)
+    valid_to: Mapped[date | None] = mapped_column(Date)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    extraction_method: Mapped[str] = mapped_column(String(32), nullable=False)
+    confidence: Mapped[Decimal] = mapped_column(Numeric(3, 2), nullable=False)
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False,
+    )
+    source_checksum: Mapped[str | None] = mapped_column(String(64))
+    raw_payload: Mapped[bytes | None] = mapped_column()
+
+    __table_args__ = (
+        CheckConstraint(
+            "confidence BETWEEN 0 AND 1", name="ck_rel_confidence",
+        ),
+        CheckConstraint(
+            "valid_to IS NULL OR valid_to >= valid_from",
+            name="ck_rel_temporal_order",
+        ),
+        Index("idx_rel_source", "source_id", "source_type"),
+        Index("idx_rel_target", "target_id", "target_type"),
+        Index("idx_rel_temporal", "valid_from", "valid_to"),
+        Index("idx_rel_kind", "kind"),
+    )
