@@ -18,7 +18,7 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from codicecivico.ingest.base import BaseIngestor
@@ -393,3 +393,117 @@ class AnacIngestor(BaseIngestor):
     async def get_checkpoint(self, session: AsyncSession) -> str | None:
         """Get last ingested month (YYYY-MM format)."""
         return await self.get_last_checkpoint(session)
+
+    async def update_suppliers_from_snapshot(
+        self,
+        session: AsyncSession,
+        *,
+        snapshot_date: str,
+        batch_size: int = 2000,
+    ) -> int:
+        """Stream the aggiudicatari ZIP and fill in supplier_name/supplier_cf.
+
+        The aggiudicatari dataset contains one row per (CIG, winner). A CIG
+        with N awardees gets N rows — we keep the FIRST seen per CIG (primary
+        awardee) by guarding UPDATE with `supplier_name IS NULL`.
+
+        Streaming design: opens the CSV inside the ZIP as a file-like and
+        iterates row-by-row. Keeps memory O(batch_size), not O(N rows).
+
+        Args:
+            snapshot_date: YYYYMMDD snapshot date (ANAC publishes monthly).
+            batch_size: Rows per SQL UPDATE flush.
+
+        Returns:
+            Number of contracts updated with supplier info.
+        """
+        url = _aggiudicatari_url(snapshot_date)
+        logger.info("Streaming aggiudicatari snapshot %s ...", snapshot_date)
+
+        # Download to memory (22 MB ZIP is fine); CSV stays streamed inside.
+        zip_bytes = await _download_zip(url)
+        if zip_bytes is None:
+            logger.error("Failed to download aggiudicatari snapshot %s", snapshot_date)
+            return 0
+
+        total_updated = 0
+        seen_cigs: set[str] = set()
+        batch: list[tuple[str, str | None, str | None]] = []
+
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            csv_names = [n for n in zf.namelist() if n.lower().endswith(".csv")]
+            if not csv_names:
+                logger.error("No CSV in aggiudicatari ZIP")
+                return 0
+            csv_name = max(csv_names, key=lambda n: zf.getinfo(n).file_size)
+
+            with zf.open(csv_name) as raw_f:
+                text_f = io.TextIOWrapper(raw_f, encoding="utf-8", errors="replace")
+                # Detect delimiter from first line, then reset by re-reading
+                first_line = text_f.readline()
+                delimiter = ";" if first_line.count(";") > first_line.count(",") else ","
+                # Rebuild reader from start — zipfile streams are not seekable
+                # so we reopen
+                raw_f.close()
+
+            with zf.open(csv_name) as raw_f:
+                text_f = io.TextIOWrapper(raw_f, encoding="utf-8", errors="replace")
+                reader = csv.DictReader(text_f, delimiter=delimiter)
+                for row in reader:
+                    cig = (row.get("cig") or "").strip()
+                    if not cig or cig in seen_cigs:
+                        continue
+                    seen_cigs.add(cig)
+                    ocid = f"ocds-hu01ve-{cig}"
+                    supplier_name = (
+                        (row.get("denominazione") or "").strip()
+                        or (row.get("ragione_sociale") or "").strip()
+                        or None
+                    )
+                    supplier_cf = (row.get("codice_fiscale") or "").strip() or None
+                    batch.append((ocid, supplier_name, supplier_cf))
+
+                    if len(batch) >= batch_size:
+                        total_updated += await self._flush_supplier_batch(session, batch)
+                        batch = []
+                        logger.info(
+                            "Aggiudicatari: %d contracts updated so far "
+                            "(%d unique CIGs seen)...",
+                            total_updated,
+                            len(seen_cigs),
+                        )
+
+                if batch:
+                    total_updated += await self._flush_supplier_batch(session, batch)
+
+        await session.commit()
+        logger.info(
+            "Aggiudicatari: %d contracts updated (%d unique CIGs in snapshot).",
+            total_updated,
+            len(seen_cigs),
+        )
+        return total_updated
+
+    async def _flush_supplier_batch(
+        self,
+        session: AsyncSession,
+        batch: list[tuple[str, str | None, str | None]],
+    ) -> int:
+        """UPDATE contracts with supplier info, only where supplier_name is NULL.
+
+        The `WHERE supplier_name IS NULL` guard makes this idempotent and
+        preserves the first-winner-wins semantics within a single run.
+        """
+        updated = 0
+        for ocid, supplier_name, supplier_cf in batch:
+            if not supplier_name and not supplier_cf:
+                continue
+            stmt = (
+                update(Contract)
+                .where(Contract.ocid == ocid, Contract.supplier_name.is_(None))
+                .values(supplier_name=supplier_name, supplier_cf=supplier_cf)
+            )
+            result = await session.execute(stmt)
+            updated += result.rowcount or 0
+        await session.flush()
+        return updated

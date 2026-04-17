@@ -67,6 +67,33 @@ def ingest(source: str, limit: int | None, year: int | None, month: int | None) 
     click.echo(f"[{source}] Ingestion complete: {total} records processed.")
 
 
+@cli.command("anac-suppliers")
+@click.option(
+    "--snapshot",
+    required=True,
+    help="Aggiudicatari snapshot date in YYYYMMDD format (e.g. 20260401).",
+)
+def anac_suppliers(snapshot: str) -> None:
+    """Update existing contracts with supplier_name/supplier_cf from aggiudicatari.
+
+    Streams the aggiudicatari CSV from ANAC (cumulative, ~99MB uncompressed)
+    and fills in supplier info on Contract rows already ingested via
+    `ingest --source anac`. Idempotent: only updates rows where
+    supplier_name is NULL.
+    """
+    from codicecivico.ingest.anac import AnacIngestor
+
+    async def _run() -> int:
+        async with async_session() as session:
+            ingestor = AnacIngestor()
+            return await ingestor.update_suppliers_from_snapshot(
+                session, snapshot_date=snapshot,
+            )
+
+    total = _run_async(_run())
+    click.echo(f"[anac-suppliers] Updated {total} contracts with supplier info.")
+
+
 @cli.command("entity-resolve")
 def entity_resolve() -> None:
     """Run cross-chamber entity resolution (merge Camera/Senato duplicates)."""
