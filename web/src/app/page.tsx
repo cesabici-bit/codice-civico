@@ -1,8 +1,9 @@
 import Link from "next/link";
 import Card from "@/components/ui/Card";
 import RiskBadge from "@/components/contracts/RiskBadge";
+import ContractStatus from "@/components/contracts/ContractStatus";
 import { fetchContractAnomalies, fetchLaws, fetchStatsOverview } from "@/lib/api";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 
 export default async function DashboardPage() {
   let stats = {
@@ -149,7 +150,12 @@ export default async function DashboardPage() {
                       </Link>
                     </td>
                     <td className="py-3 text-[var(--text-secondary)]">{c.supplier_name || "—"}</td>
-                    <td className="py-3 text-right">{formatCurrency(c.amount_awarded)}</td>
+                    <td className="py-3 text-right">
+                      <ContractStatus
+                        amountAwarded={c.amount_awarded}
+                        amountOriginal={c.amount_original}
+                      />
+                    </td>
                     <td className="py-3 text-center">
                       <RiskBadge score={c.risk_score} />
                     </td>

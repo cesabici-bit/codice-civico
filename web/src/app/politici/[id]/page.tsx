@@ -3,6 +3,7 @@ import { fetchPoliticianDossier } from "@/lib/api";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import RiskBadge from "@/components/contracts/RiskBadge";
+import ContractStatus from "@/components/contracts/ContractStatus";
 import PromiseBreakdown from "@/components/charts/PromiseBreakdown";
 import AssetTimeline from "@/components/charts/AssetTimeline";
 import {
@@ -207,7 +208,12 @@ export default async function PoliticianDossierPage({
                   <tr key={c.id} className="border-b border-[var(--border)] last:border-0">
                     <td className="py-2">{c.buyer_name}</td>
                     <td className="py-2 text-[var(--text-secondary)]">{c.supplier_name || "—"}</td>
-                    <td className="py-2 text-right">{formatCurrency(c.amount_awarded)}</td>
+                    <td className="py-2 text-right">
+                      <ContractStatus
+                        amountAwarded={c.amount_awarded}
+                        amountOriginal={c.amount_original}
+                      />
+                    </td>
                     <td className="py-2 text-center"><RiskBadge score={c.risk_score} /></td>
                   </tr>
                 ))}

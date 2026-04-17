@@ -59,6 +59,7 @@ export interface ContractSummary {
   buyer_name: string;
   supplier_name: string | null;
   amount_awarded: number | null;
+  amount_original: number | null;
   procedure_type: string | null;
   award_date: string | null;
   risk_score: number;
@@ -79,7 +80,6 @@ export interface ContractDetail extends ContractSummary {
   buyer_province: string | null;
   supplier_cf: string | null;
   cpv_code: string | null;
-  amount_original: number | null;
   publication_date: string | null;
   contract_duration_days: number | null;
   source_url: string | null;

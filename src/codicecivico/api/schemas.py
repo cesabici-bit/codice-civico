@@ -93,6 +93,7 @@ class ContractSummary(BaseModel):
     buyer_name: str
     supplier_name: str | None
     amount_awarded: Decimal | None
+    amount_original: Decimal | None
     procedure_type: str | None
     award_date: date | None
     risk_score: float
@@ -106,7 +107,6 @@ class ContractDetail(ContractSummary):
     buyer_province: str | None
     supplier_cf: str | None
     cpv_code: str | None
-    amount_original: Decimal | None
     publication_date: date | None
     contract_duration_days: int | None
     source_url: str | None

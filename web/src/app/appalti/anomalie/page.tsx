@@ -2,8 +2,8 @@ import Link from "next/link";
 import { fetchContractAnomalies } from "@/lib/api";
 import Card from "@/components/ui/Card";
 import RiskBadge from "@/components/contracts/RiskBadge";
+import ContractStatus from "@/components/contracts/ContractStatus";
 import EmptyState from "@/components/ui/EmptyState";
-import { formatCurrency } from "@/lib/utils";
 
 export const metadata = { title: "Top Anomalie Appalti" };
 
@@ -45,7 +45,13 @@ export default async function AnomaliePage() {
                 <p className="text-sm text-[var(--text-secondary)] truncate">
                   {c.supplier_name || "Fornitore non specificato"}
                 </p>
-                <p className="mt-2 text-lg font-bold">{formatCurrency(c.amount_awarded)}</p>
+                <div className="mt-2 text-lg font-bold">
+                  <ContractStatus
+                    amountAwarded={c.amount_awarded}
+                    amountOriginal={c.amount_original}
+                    variant="inline"
+                  />
+                </div>
               </Card>
             </Link>
           ))}

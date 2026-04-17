@@ -2,8 +2,9 @@ import Link from "next/link";
 import { fetchContracts } from "@/lib/api";
 import Card from "@/components/ui/Card";
 import RiskBadge from "@/components/contracts/RiskBadge";
+import ContractStatus from "@/components/contracts/ContractStatus";
 import EmptyState from "@/components/ui/EmptyState";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 
 export const metadata = { title: "Appalti" };
 
@@ -66,7 +67,12 @@ export default async function AppaltiPage({ searchParams }: Props) {
                   </td>
                   <td className="py-3 text-[var(--text-secondary)]">{c.supplier_name || "—"}</td>
                   <td className="py-3 text-[var(--text-secondary)]">{c.procedure_type || "—"}</td>
-                  <td className="py-3 text-right">{formatCurrency(c.amount_awarded)}</td>
+                  <td className="py-3 text-right">
+                    <ContractStatus
+                      amountAwarded={c.amount_awarded}
+                      amountOriginal={c.amount_original}
+                    />
+                  </td>
                   <td className="py-3 text-center">{c.n_bids ?? "—"}</td>
                   <td className="py-3 text-center"><RiskBadge score={c.risk_score} /></td>
                   <td className="py-3 text-[var(--text-secondary)]">{formatDate(c.award_date)}</td>

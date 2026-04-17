@@ -42,14 +42,28 @@ export default async function ContractDetailPage({
         <Card>
           <h2 className="mb-4 text-lg font-semibold">Dettagli Contratto</h2>
           <dl className="space-y-3 text-sm">
+            <div className="flex items-start justify-between">
+              <dt className="text-[var(--text-secondary)]">Stato</dt>
+              <dd>
+                {c.amount_awarded && c.amount_awarded > 0 ? (
+                  <span className="inline-flex items-center rounded-full bg-emerald-100 dark:bg-emerald-900/30 px-2.5 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                    Aggiudicato
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center rounded-full bg-sky-100 dark:bg-sky-900/30 px-2.5 py-0.5 text-xs font-medium text-sky-700 dark:text-sky-300">
+                    In corso
+                  </span>
+                )}
+              </dd>
+            </div>
             {[
               ["OCID", c.ocid],
-              ["Importo aggiudicato", formatCurrency(c.amount_awarded)],
-              ["Importo originale", formatCurrency(c.amount_original)],
+              ["Importo aggiudicato", c.amount_awarded && c.amount_awarded > 0 ? formatCurrency(c.amount_awarded) : "Non ancora aggiudicato"],
+              ["Importo base d'asta", formatCurrency(c.amount_original)],
               ["Procedura", c.procedure_type],
               ["Codice CPV", c.cpv_code],
               ["Data pubblicazione", formatDate(c.publication_date)],
-              ["Data aggiudicazione", formatDate(c.award_date)],
+              ["Data aggiudicazione", c.award_date ? formatDate(c.award_date) : "—"],
               ["Durata (giorni)", c.contract_duration_days?.toString()],
               ["N. offerte", c.n_bids?.toString()],
               ["Regione", c.buyer_region],
