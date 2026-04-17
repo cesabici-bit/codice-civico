@@ -4,6 +4,14 @@
 F9 Deploy Live su VPS — IN PROGRESS | F8 Deploy Infra — COMPLETED | F7 Legislative Translator — COMPLETED | F6 Frontend + README — COMPLETED | F5 Justice Map — COMPLETED | F4 NLP Promise Tracker — COMPLETED | F3 Anomaly Detection — COMPLETED | F2 Ingestion — COMPLETED
 
 ## Ultimo Subtask Completato
+ST-9.11-9.14 (2026-04-17): Production data-quality polish.
+- ST-9.11 Aggiudicatari streaming ingest: new `AnacIngestor.update_suppliers_from_snapshot()` + CLI `anac-suppliers --snapshot YYYYMMDD`. Stream-reads 99MB CSV from within ZIP, batch UPDATE with `supplier_name IS NULL` guard. **146,860 contracts enriched with supplier info** (82% coverage). RAM stayed flat at 1.3GB.
+- ST-9.12 Anomaly re-run with supplier data: **81,947 flags** (vs 81,375 before). REVOLVING_DOOR rule now fires: 572 flags (140 high, 432 medium).
+- ST-9.13 `/api/v1/stats/overview` endpoint: single-query aggregates. Dashboard uses live counts (668 politicians, not hardcoded 900). New "Appalti ad alto rischio" card: 968 contracts with risk_score ≥ 70.
+- ST-9.14 HTML entity decoding: `clean_text()` helper in ingest.base (html.unescape + strip inline tags). Applied to Camera/Senato ingestors for law titles and speech labels. Backfill CLI `decode-entities` ran one-shot on production: **210/250 laws cleaned**. No more `&quot;` / `&rsquo;` / `&lt;em&gt;` in UI.
+- Frontend healthcheck fix: wget target from `localhost` to `127.0.0.1` (Next.js standalone binds IPv4 only, busybox resolves localhost to ::1 first). Frontend container now healthy.
+- 215 tests green (+7 clean_text unit tests).
+
 ST-9.9-9.10 (2026-04-17): ANAC full ingest + anomaly pipeline LIVE.
 - Fix deployato (_parse_decimal auto-detect era in repo ma immagine VPS stale) → **170,667 contratti 2025-12** ingested in ~4min
 - Raised backend memory limit 1024M→2560M (cgroup OOM at ~1GB RSS killed all prior attempts)
