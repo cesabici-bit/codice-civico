@@ -58,6 +58,21 @@ export function fetchHealth() {
   return apiFetch<HealthResponse>("/health", { revalidate: 60 });
 }
 
+export interface StatsOverview {
+  politicians: number;
+  contracts: number;
+  anomaly_flags: number;
+  high_risk_contracts: number;
+  tribunals: number;
+  laws: number;
+  promises: number;
+  court_stats: number;
+}
+
+export function fetchStatsOverview() {
+  return apiFetch<StatsOverview>("/stats/overview", { revalidate: 300 });
+}
+
 // ---------------------------------------------------------------------------
 // Politicians
 // ---------------------------------------------------------------------------

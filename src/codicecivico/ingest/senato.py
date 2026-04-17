@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from codicecivico.config import settings
-from codicecivico.ingest.base import BaseIngestor
+from codicecivico.ingest.base import BaseIngestor, clean_text
 from codicecivico.models import LegislativeAct, Politician
 
 logger = logging.getLogger(__name__)
@@ -260,7 +260,7 @@ class SenatoIngestor(BaseIngestor):
             if existing:
                 continue
 
-            titolo = row.get("titolo", "")
+            titolo = clean_text(row.get("titolo"))
             act = LegislativeAct(
                 title=titolo[:2000] if titolo else "Senza titolo",
                 act_type=row.get("natura", "DDL"),

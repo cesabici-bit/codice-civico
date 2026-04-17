@@ -67,6 +67,58 @@ def ingest(source: str, limit: int | None, year: int | None, month: int | None) 
     click.echo(f"[{source}] Ingestion complete: {total} records processed.")
 
 
+@cli.command("decode-entities")
+def decode_entities() -> None:
+    """Backfill clean_text across rows that contain HTML entities or tags.
+
+    One-shot migration for data ingested before the clean_text helper was
+    added. Operates on legislative_acts.title and speeches.full_text.
+    Idempotent: rows already clean are left untouched.
+    """
+    from sqlalchemy import or_, select
+
+    from codicecivico.ingest.base import clean_text
+    from codicecivico.models import LegislativeAct, Speech
+
+    async def _run() -> tuple[int, int]:
+        laws_updated = 0
+        speeches_updated = 0
+        async with async_session() as session:
+            stmt = select(LegislativeAct).where(
+                or_(
+                    LegislativeAct.title.like("%&%"),
+                    LegislativeAct.title.like("%<%"),
+                ),
+            )
+            result = await session.execute(stmt)
+            for law in result.scalars().all():
+                cleaned = clean_text(law.title)
+                if cleaned and cleaned != law.title:
+                    law.title = cleaned[:2000]
+                    laws_updated += 1
+
+            stmt2 = select(Speech).where(
+                or_(
+                    Speech.full_text.like("%&%"),
+                    Speech.full_text.like("%<%"),
+                ),
+            )
+            result2 = await session.execute(stmt2)
+            for sp in result2.scalars().all():
+                cleaned = clean_text(sp.full_text)
+                if cleaned and cleaned != sp.full_text:
+                    sp.full_text = cleaned
+                    speeches_updated += 1
+
+            await session.commit()
+        return laws_updated, speeches_updated
+
+    laws, speeches = _run_async(_run())
+    click.echo(
+        f"[decode-entities] Cleaned {laws} laws and {speeches} speeches.",
+    )
+
+
 @cli.command("anac-suppliers")
 @click.option(
     "--snapshot",

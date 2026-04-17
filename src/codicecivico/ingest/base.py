@@ -1,6 +1,8 @@
 """Base ingestor abstract class with SPARQL helpers."""
 
+import html
 import logging
+import re
 import time
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
@@ -12,6 +14,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from codicecivico.models import IngestionLog
 
 logger = logging.getLogger(__name__)
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def clean_text(value: str | None) -> str | None:
+    """Decode HTML entities and strip inline tags from text coming out of SPARQL.
+
+    The Camera/Senato SPARQL endpoints return titles and labels with HTML-
+    encoded content (e.g. `&quot;`, `&rsquo;`, `&agrave;`, `<em>...</em>`).
+    Storing them raw leaks markup into the UI. This helper normalizes to
+    plain unicode text.
+    """
+    if value is None:
+        return None
+    # html.unescape resolves &quot; &agrave; &rsquo; &lt; &gt; etc.
+    decoded = html.unescape(value)
+    # Strip any residual inline tags (e.g. <em>caregiver</em>)
+    stripped = _HTML_TAG_RE.sub("", decoded)
+    # Collapse internal whitespace and trim
+    return " ".join(stripped.split()).strip() or None
 
 SPARQL_PAGE_SIZE = 500
 SPARQL_TIMEOUT = 30  # seconds

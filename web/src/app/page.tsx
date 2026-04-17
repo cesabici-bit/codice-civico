@@ -1,26 +1,30 @@
 import Link from "next/link";
 import Card from "@/components/ui/Card";
 import RiskBadge from "@/components/contracts/RiskBadge";
-import { fetchPoliticians, fetchContractAnomalies, fetchLaws, fetchCourts } from "@/lib/api";
+import { fetchContractAnomalies, fetchLaws, fetchStatsOverview } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
 export default async function DashboardPage() {
-  let politiciansCount = 0;
+  let stats = {
+    politicians: 0,
+    contracts: 0,
+    high_risk_contracts: 0,
+    anomaly_flags: 0,
+    tribunals: 0,
+    laws: 0,
+  };
   let contractsTop: Awaited<ReturnType<typeof fetchContractAnomalies>> = [];
   let lawsRecent: Awaited<ReturnType<typeof fetchLaws>> = [];
-  let courtsCount = 0;
 
   try {
-    const [politicians, anomalies, laws, courts] = await Promise.allSettled([
-      fetchPoliticians({ per_page: 1 }),
+    const [overview, anomalies, laws] = await Promise.allSettled([
+      fetchStatsOverview(),
       fetchContractAnomalies(5),
       fetchLaws({ per_page: 5 }),
-      fetchCourts(),
     ]);
-    if (politicians.status === "fulfilled") politiciansCount = politicians.value.length > 0 ? 900 : 0; // placeholder until count endpoint
+    if (overview.status === "fulfilled") stats = { ...stats, ...overview.value };
     if (anomalies.status === "fulfilled") contractsTop = anomalies.value;
     if (laws.status === "fulfilled") lawsRecent = laws.value;
-    if (courts.status === "fulfilled") courtsCount = courts.value.length;
   } catch {
     // API non disponibile — mostriamo la pagina con dati vuoti
   }
@@ -85,10 +89,10 @@ export default async function DashboardPage() {
       {/* Stat cards */}
       <section className="mb-12 grid grid-cols-2 gap-4 sm:grid-cols-4">
         {[
-          { label: "Politici tracciati", value: politiciansCount || "—" },
-          { label: "Top anomalie", value: contractsTop.length || "—" },
-          { label: "Tribunali monitorati", value: courtsCount || "—" },
-          { label: "Leggi analizzate", value: lawsRecent.length || "—" },
+          { label: "Politici tracciati", value: stats.politicians || "—" },
+          { label: "Appalti ad alto rischio", value: stats.high_risk_contracts || "—" },
+          { label: "Tribunali monitorati", value: stats.tribunals || "—" },
+          { label: "Leggi analizzate", value: stats.laws || "—" },
         ].map((stat) => (
           <Card key={stat.label} className="text-center">
             <p className="text-3xl font-bold text-primary-600 dark:text-primary-400">

@@ -1,15 +1,28 @@
-"""System routes: health, ingestion status."""
+"""System routes: health, ingestion status, aggregate stats."""
 
 import shutil
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from codicecivico import __version__
 from codicecivico.api.deps import get_db
-from codicecivico.api.schemas import HealthDetailedResponse, HealthResponse
+from codicecivico.api.schemas import (
+    HealthDetailedResponse,
+    HealthResponse,
+    StatsOverview,
+)
 from codicecivico.config import settings
+from codicecivico.models import (
+    AnomalyFlag,
+    Contract,
+    CourtStat,
+    LegislativeAct,
+    Politician,
+    Promise,
+    Tribunal,
+)
 
 router = APIRouter(tags=["system"])
 
@@ -69,4 +82,33 @@ async def health_detailed(
         status=overall,
         version=__version__,
         checks=checks,
+    )
+
+
+@router.get("/stats/overview", response_model=StatsOverview)
+async def stats_overview(
+    session: AsyncSession = Depends(get_db),
+) -> StatsOverview:
+    """Aggregate counts across all tables, used by the dashboard homepage."""
+    # Single query per table — on 170k contracts this is <50ms with indexes.
+    politicians = await session.scalar(select(func.count(Politician.id)))
+    contracts = await session.scalar(select(func.count(Contract.id)))
+    flags = await session.scalar(select(func.count(AnomalyFlag.id)))
+    high_risk = await session.scalar(
+        select(func.count(Contract.id)).where(Contract.risk_score >= 70),
+    )
+    tribunals = await session.scalar(select(func.count(Tribunal.id)))
+    laws = await session.scalar(select(func.count(LegislativeAct.id)))
+    promises = await session.scalar(select(func.count(Promise.id)))
+    court_stats = await session.scalar(select(func.count(CourtStat.id)))
+
+    return StatsOverview(
+        politicians=politicians or 0,
+        contracts=contracts or 0,
+        anomaly_flags=flags or 0,
+        high_risk_contracts=high_risk or 0,
+        tribunals=tribunals or 0,
+        laws=laws or 0,
+        promises=promises or 0,
+        court_stats=court_stats or 0,
     )

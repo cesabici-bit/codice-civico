@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from codicecivico.config import settings
-from codicecivico.ingest.base import BaseIngestor
+from codicecivico.ingest.base import BaseIngestor, clean_text
 from codicecivico.models import LegislativeAct, Politician, Speech, Vote
 
 logger = logging.getLogger(__name__)
@@ -298,7 +298,7 @@ class CameraIngestor(BaseIngestor):
                 continue
 
             act = LegislativeAct(
-                title=row.get("titolo", "")[:2000],
+                title=(clean_text(row.get("titolo")) or "")[:2000],
                 act_type=row.get("tipo"),
                 chamber="camera",
                 presentation_date=_parse_date(row.get("data", "")),
@@ -340,7 +340,7 @@ class CameraIngestor(BaseIngestor):
             if existing:
                 continue
 
-            label = row.get("label", "")
+            label = clean_text(row.get("label")) or ""
             speech = Speech(
                 politician_id=politician.id,
                 speech_date=date.today(),  # SPARQL label doesn't always have date

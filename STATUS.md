@@ -4,7 +4,18 @@
 F9 Deploy Live su VPS — IN PROGRESS | F8 Deploy Infra — COMPLETED | F7 Legislative Translator — COMPLETED | F6 Frontend + README — COMPLETED | F5 Justice Map — COMPLETED | F4 NLP Promise Tracker — COMPLETED | F3 Anomaly Detection — COMPLETED | F2 Ingestion — COMPLETED
 
 ## Ultimo Subtask Completato
-ST-9.3-9.8 (2026-04-17): MVP LIVE with partial data. 6 commits of fixes: 3 Docker (README, .gitkeep, HOSTNAME), 1 SPARQL format (str.replace not format), 1 torch CPU-only, 1 ANAC decimal format auto-detect. Backup cron + 4GB swap active. DB: 668 politici / 250 atti / 144 tribunali / 1540 CourtStat. Contract=0 (ANAC retry running on VPS). 203 test verdi.
+ST-9.9-9.10 (2026-04-17): ANAC full ingest + anomaly pipeline LIVE.
+- Fix deployato (_parse_decimal auto-detect era in repo ma immagine VPS stale) → **170,667 contratti 2025-12** ingested in ~4min
+- Raised backend memory limit 1024M→2560M (cgroup OOM at ~1GB RSS killed all prior attempts)
+- Removed ollama image from VPS (10GB freed, not used on CX22)
+- NEW: `anomaly/pipeline.py` (run_anomaly_pipeline) + CLI `train --model anomaly` fully implemented
+- Full run scored 170,667 contracts in 80s → **81,375 AnomalyFlag rows**
+  - PRICE_SPIKE: 37,527 (22%) / SPLIT_CONTRACTS: 33,494 (20%) / SHORT_DURATION: 5,594 / LAST_MINUTE: 4,760
+  - SINGLE_BID + REVOLVING_DOOR = 0 (require supplier data, missing without aggiudicatari CSV)
+- API `/contracts?min_risk_score=70` returns real data (top: RAI, Presidenza Consiglio, Banca d'Italia)
+- 205 test verdi (+2 pipeline unit tests)
+
+ST-9.3-9.8 (2026-04-17): MVP LIVE with partial data. 6 commits of fixes: 3 Docker (README, .gitkeep, HOSTNAME), 1 SPARQL format (str.replace not format), 1 torch CPU-only, 1 ANAC decimal format auto-detect. Backup cron + 4GB swap active.
 
 ## F9 Deploy Live — Stato Dettagliato (2026-04-16)
 

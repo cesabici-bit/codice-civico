@@ -20,6 +20,19 @@ class HealthDetailedResponse(HealthResponse):
     checks: dict[str, object] = {}
 
 
+class StatsOverview(BaseModel):
+    """Aggregate counts for the dashboard homepage."""
+
+    politicians: int
+    contracts: int
+    anomaly_flags: int
+    high_risk_contracts: int
+    tribunals: int
+    laws: int
+    promises: int
+    court_stats: int
+
+
 # ---------------------------------------------------------------------------
 # Politicians
 # ---------------------------------------------------------------------------
