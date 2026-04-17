@@ -105,10 +105,28 @@ def nlp(pipeline: str, limit: int | None) -> None:
 
 
 @cli.command()
-@click.option("--model", type=click.Choice(["anomaly"]))
-def train(model: str) -> None:
-    """Train ML models."""
-    click.echo(f"Training {model} model not yet implemented.")
+@click.option("--model", type=click.Choice(["anomaly"]), required=True)
+@click.option("--limit", type=int, default=None, help="Max contracts to score.")
+def train(model: str, limit: int | None) -> None:
+    """Run anomaly detection pipeline on ingested contracts.
+
+    Loads all Contract rows, trains IsolationForest, runs 7 rule-based
+    checks, and populates AnomalyFlag + Contract.risk_score.
+    Idempotent: clears existing flags before recomputing.
+    """
+    from codicecivico.anomaly.pipeline import run_anomaly_pipeline
+
+    async def _run() -> tuple[int, int]:
+        async with async_session() as session:
+            scored, flags = await run_anomaly_pipeline(session, limit=limit)
+            await session.commit()
+            return scored, flags
+
+    scored, flags = _run_async(_run())
+    click.echo(
+        f"[{model}] Pipeline complete: {scored} contracts scored, "
+        f"{flags} AnomalyFlag rows inserted.",
+    )
 
 
 @cli.command()
