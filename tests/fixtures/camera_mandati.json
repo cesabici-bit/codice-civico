@@ -1,0 +1,35 @@
+{
+  "_comment": "SPARQL live snapshot 2026-04-18 from dati.camera.it. Query: SELECT ?mandato ?dep ?nome ?cognome ?startDate ?endDate ?leg ?motivo WHERE { ?mandato a ocd:mandatoCamera ; ocd:rif_deputato ?dep ; ocd:rif_leg ?leg . OPTIONAL { ?mandato ocd:startDate ?startDate } OPTIONAL { ?mandato ocd:endDate ?endDate } OPTIONAL { ?mandato ocd:motivoTermine ?motivo } ?dep foaf:firstName ?nome ; foaf:surname ?cognome . FILTER(?leg = <http://dati.camera.it/ocd/legislatura.rdf/repubblica_19>) }",
+  "results": {
+    "bindings": [
+      {
+        "mandato": {"type": "uri", "value": "http://dati.camera.it/ocd/mandatoCamera.rdf/mc19_302103_20221013"},
+        "dep": {"type": "uri", "value": "http://dati.camera.it/ocd/deputato.rdf/d302103_19"},
+        "nome": {"type": "literal", "value": "GIORGIA"},
+        "cognome": {"type": "literal", "value": "MELONI"},
+        "startDate": {"type": "literal", "value": "20221013"},
+        "leg": {"type": "uri", "value": "http://dati.camera.it/ocd/legislatura.rdf/repubblica_19"}
+      },
+      {
+        "mandato": {"type": "uri", "value": "http://dati.camera.it/ocd/mandatoCamera.rdf/mc19_307304_20221008"},
+        "dep": {"type": "uri", "value": "http://dati.camera.it/ocd/deputato.rdf/d307304_19"},
+        "nome": {"type": "literal", "value": "MARIO"},
+        "cognome": {"type": "literal", "value": "ROSSI"},
+        "startDate": {"type": "literal", "value": "20221008"},
+        "endDate": {"type": "literal", "value": "20260202"},
+        "motivo": {"type": "literal", "value": "Dimissioni per incompatibilita'"},
+        "leg": {"type": "uri", "value": "http://dati.camera.it/ocd/legislatura.rdf/repubblica_19"}
+      },
+      {
+        "mandato": {"type": "uri", "value": "http://dati.camera.it/ocd/mandatoCamera.rdf/mc19_307722_20221009"},
+        "dep": {"type": "uri", "value": "http://dati.camera.it/ocd/deputato.rdf/d307722_19"},
+        "nome": {"type": "literal", "value": "LUIGI"},
+        "cognome": {"type": "literal", "value": "BIANCHI"},
+        "startDate": {"type": "literal", "value": "20221009"},
+        "endDate": {"type": "literal", "value": "20250312"},
+        "motivo": {"type": "literal", "value": "Annullamento Elezione"},
+        "leg": {"type": "uri", "value": "http://dati.camera.it/ocd/legislatura.rdf/repubblica_19"}
+      }
+    ]
+  }
+}

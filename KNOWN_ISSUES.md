@@ -127,6 +127,28 @@
 - **Fix**: TBD — test QUERY_INTERVENTI directly against dati.camera.it endpoint
 - **Status**: OPEN
 
+### EC-016: URI prefix Camera deputato — memoria imprecisa su `dr`
+- **Data**: 2026-04-18
+- **Sintomo**: pianificazione ST-10.2 e ROADMAP Sprint 2 usavano regex
+  `dr(\d+)_\d+` basata su annotazione memoria `dr3325` come person-stable
+  tra legislature 16-22.
+- **Causa**: la memoria riferiva a legislature del **Regno d'Italia** (16-22),
+  non della Repubblica. L'endpoint `dati.camera.it` live (verificato 2026-04-18
+  via WebFetch) mostra che le legislature repubblicane (almeno 15-19) usano
+  uniformemente il prefisso `d` semplice seguito da digits (es. Meloni
+  `d302103_15`..`d302103_19`, stabile). Il prefisso `dr` appartiene a dati
+  storici pre-Repubblica. Il prefisso `dd` appartiene probabilmente a
+  legislature repubblicane molto antiche con ID non stabile (EC-015).
+- **Fix**: regex finale `deputato\.rdf/(d\d+)_(\d+)$` con check esplicito che
+  il primo char dopo `d` sia un digit (esclude `dd`, `dr`). Solo prefisso `d`
+  semplice accettato. Storico rinviato a EC-015. Namespace scelto `camera`
+  (non `camera_leg` come proposto in ROADMAP) poiché l'id `d\d+` è già
+  persona-stabile per le legislature correnti.
+- **Prevenzione**: prima di definire regex basate su pattern URI, verifica
+  sempre live via SPARQL con almeno un soggetto noto (es. Meloni, Schlein)
+  in ≥2 legislature. Non fidarsi della memoria su pattern stringhe.
+- **Status**: FIXED
+
 ### EC-015: Entity resolution politici — deduplicazione cross-legislatura differita
 - **Data**: 2026-04-17
 - **Sintomo**: il deduplicatore `entity/resolver.py` non è mai stato misurato con precision/recall.

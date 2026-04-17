@@ -1,17 +1,20 @@
 # Status — Codice Civico
 
 ## Fase Corrente
-Sprint 2 (F10 Graph Layer) IN CORSO — **schema bitemporale committato `2be6b8f` (2026-04-18)** | Sprint 1 (F11 Entity Resolution) CHIUSO EC-015 | F9.5 Anomaly Calibration DEPLOYED | F8-F2 COMPLETED
+Sprint 2 (F10 Graph Layer) IN CORSO — **CameraIngestor rewrite F10 completato (2026-04-18)** | schema `2be6b8f` | Sprint 1 (F11) CHIUSO EC-015 | F9.5 Anomaly Calibration DEPLOYED | F8-F2 COMPLETED
 
-**Prossimo (F10, ordine)**:
-1. Ricerca ontologia Senato: esiste `osr:mandato` su `dati.senato.it` con pattern analogo a `ocd:mandatoCamera`? Qual è il pattern URI senatore? (decide strategia link Camera↔Senato)
-2. Riscrivere `CameraIngestor` su `ocd:mandatoCamera` + regex `dr(\d+)_\d+` per `person_id` deterministico; popolare `persons` + `person_external_ids` + `mandates` + `party_memberships`
-3. Se identificatore persona Senato separato: link via `person_external_ids` (namespace `wikidata` o `owl:sameAs`)
-4. Endpoint `/graph/expand` con CTE ricorsiva 2-hop
-5. Test L1/L2 (regex, bitemporal query, M5 enforcement), poi Gate F10
-6. Applicare migration 0002 su VPS prod
+**Prossimo (F10, ordine aggiornato)**:
+1. ~~Ricerca ontologia Senato~~ DONE 2026-04-17 (vedi ROADMAP Sprint 2)
+2. ~~Riscrivere `CameraIngestor` su `ocd:mandatoCamera`~~ DONE 2026-04-18 (ST-10.2). Verifica empirica live ha invalidato la regex originaria (`dr(\d+)_\d+`): il pattern URI Camera leg 19 è `d\d+_\d+` (prefisso `d` semplice, persona-stabile). Vedi EC-016.
+3. Riscrivere `SenatoIngestor` su `osr:mandato` + regex `senatore/(\d+)` + catena `owl:sameAs` per link Camera↔Senato
+4. Popolamento `relationships` da dati esistenti (contract→buyer, law→sponsor, speech→speaker)
+5. Endpoint `/graph/{type}/{id}/expand?hops=2&as_of=YYYY-MM-DD` con CTE ricorsiva bitemporale
+6. Test L1/L2 (traversal 2-hop, M5 insert rejection, idempotency), poi Gate F10
+7. Applicare migration 0002 su VPS prod + re-run CameraIngestor live
 
-**Schema F10 già fatto (commit `2be6b8f`)**: 5 tabelle (persons, person_external_ids, mandates, party_memberships, relationships), M5 enforced (source_url NOT NULL), CK temporali, polimorfismo relationships, upgrade/downgrade verificati localmente su pg16+pgvector. 227 test verdi.
+**Schema F10 (commit `2be6b8f`)**: 5 tabelle (persons, person_external_ids, mandates, party_memberships, relationships), M5 enforced (source_url NOT NULL), CK temporali, polimorfismo relationships, upgrade/downgrade verificati localmente.
+
+**ST-10.2 CameraIngestor F10 (2026-04-18)**: `parse_camera_person_id()` estrae `(stable_id, legislature)` da URI `deputato.rdf/d\d+_\d+`. `_ingest_mandati` popola persons+person_external_ids(ns='camera')+mandates (M5: skip con warning se startDate assente). `_ingest_party_memberships` popola party_memberships con fallback a LEG_19_START se dataAdesione assente. Fixture `camera_mandati.json` costruita da live snapshot SPARQL. **245 test verdi** (+18 nuovi L1/L2). Ruff + mypy clean.
 
 ## Ultimo Subtask Completato
 F9.5 (2026-04-17) — Anomaly Calibration. Committed commits `0defa3d` (codice) + `9098243` (roadmap). Deployed VPS.

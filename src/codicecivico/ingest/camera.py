@@ -1,6 +1,7 @@
 """Camera dei Deputati SPARQL data ingestor."""
 
 import logging
+import re
 from datetime import date
 
 from sqlalchemy import select
@@ -8,11 +9,47 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from codicecivico.config import settings
 from codicecivico.ingest.base import BaseIngestor, clean_text
-from codicecivico.models import LegislativeAct, Politician, Speech, Vote
+from codicecivico.models import (
+    LegislativeAct,
+    Mandate,
+    PartyMembership,
+    Person,
+    PersonExternalId,
+    Politician,
+    Speech,
+    Vote,
+)
 
 logger = logging.getLogger(__name__)
 
 LEG_19_URI = "http://dati.camera.it/ocd/legislatura.rdf/repubblica_19"
+LEG_19_START = date(2022, 10, 13)  # Opening of 19th Republic legislature
+
+# Person-id regex: `deputato.rdf/{stable_id}_{legislature}`.
+# Modern Republic legislatures (leg 13+) use prefix `d` + digits with a
+# numeric part that is stable across legislatures (verified live for
+# Meloni `d302103` in leg 15-19 on 2026-04-18). Kingdom-of-Italy `dr` and
+# older Republic `dd` prefixes are deferred per KNOWN_ISSUES EC-015.
+_CAMERA_DEP_URI_RE = re.compile(r"deputato\.rdf/([a-z]+\d+)_(\d+)$")
+
+
+def parse_camera_person_id(uri: str) -> tuple[str, int] | None:
+    """Extract (stable_person_id, legislature) from a Camera deputy URI.
+
+    Returns ``None`` for:
+    - URIs that do not match the `deputato.rdf/{id}_{leg}` shape
+    - Historical prefixes `dd` (older Republic) or `dr` (Regno) — deferred
+    """
+    if not uri:
+        return None
+    match = _CAMERA_DEP_URI_RE.search(uri)
+    if match is None:
+        return None
+    stable_id, leg_str = match.groups()
+    # Require exactly one letter `d` followed by a digit — excludes `dd`, `dr`, etc.
+    if not (stable_id.startswith("d") and len(stable_id) > 1 and stable_id[1].isdigit()):
+        return None
+    return stable_id, int(leg_str)
 
 # ---------------------------------------------------------------------------
 # SPARQL query templates (verified against dati.camera.it 2026-03-23)
@@ -90,6 +127,42 @@ WHERE {{
 }} LIMIT {{limit}} OFFSET {{offset}}
 """
 
+# F10 bitemporal: mandates as temporal arcs Persona -> Camera.
+# Verified live against dati.camera.it on 2026-04-18 — returns
+# startDate (YYYYMMDD), optional endDate, optional motivoTermine.
+QUERY_MANDATI = f"""
+PREFIX ocd: <http://dati.camera.it/ocd/>
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+SELECT DISTINCT ?mandato ?dep ?nome ?cognome ?startDate ?endDate ?motivo
+WHERE {{
+  ?mandato a ocd:mandatoCamera .
+  ?mandato ocd:rif_deputato ?dep .
+  ?mandato ocd:rif_leg <{LEG_19_URI}> .
+  ?dep foaf:firstName ?nome .
+  ?dep foaf:surname ?cognome .
+  OPTIONAL {{ ?mandato ocd:startDate ?startDate }}
+  OPTIONAL {{ ?mandato ocd:endDate ?endDate }}
+  OPTIONAL {{ ?mandato ocd:motivoTermine ?motivo }}
+}} LIMIT {{limit}} OFFSET {{offset}}
+"""
+
+# F10 bitemporal: party adhesions as temporal arcs Persona -> group.
+# `ocd:dataAdesione` may be absent — fallback to legislature opening date.
+QUERY_ADESIONI = f"""
+PREFIX ocd: <http://dati.camera.it/ocd/>
+PREFIX dc: <http://purl.org/dc/elements/1.1/>
+SELECT ?adesione ?dep ?gruppo ?dataAdesione ?dataFineAdesione
+WHERE {{
+  ?dep a ocd:deputato .
+  ?dep ocd:rif_leg <{LEG_19_URI}> .
+  ?dep ocd:aderisce ?adesione .
+  ?adesione ocd:gruppoParlamentare ?gp .
+  ?gp dc:title ?gruppo .
+  OPTIONAL {{ ?adesione ocd:dataInizio ?dataAdesione }}
+  OPTIONAL {{ ?adesione ocd:dataFine ?dataFineAdesione }}
+}} LIMIT {{limit}} OFFSET {{offset}}
+"""
+
 
 def _parse_date(raw: str) -> date | None:
     """Parse date from SPARQL (YYYYMMDD or YYYY-MM-DD)."""
@@ -128,10 +201,18 @@ class CameraIngestor(BaseIngestor):
         try:
             n = await self._ingest_deputati(session)
             total += n
-            logger.info("Camera: %d deputati ingested.", n)
+            logger.info("Camera: %d deputati ingested (legacy politicians table).", n)
+
+            n = await self._ingest_mandati(session, max_pages=limit)
+            total += n
+            logger.info("Camera: %d mandati ingested (F10 bitemporal).", n)
+
+            n = await self._ingest_party_memberships(session, max_pages=limit)
+            total += n
+            logger.info("Camera: %d party memberships ingested (F10 bitemporal).", n)
 
             n = await self._ingest_gruppi(session)
-            logger.info("Camera: %d group memberships updated.", n)
+            logger.info("Camera: %d group memberships updated (legacy).", n)
 
             n = await self._ingest_votazioni(session, max_pages=limit)
             total += n
@@ -305,6 +386,209 @@ class CameraIngestor(BaseIngestor):
                 source_uri=atto_uri,
             )
             session.add(act)
+            count += 1
+
+        await session.flush()
+        return count
+
+    # ------------------------------------------------------------------
+    # F10 bitemporal ingestion — persons, mandates, party memberships
+    # ------------------------------------------------------------------
+
+    async def _upsert_person_camera(
+        self,
+        session: AsyncSession,
+        *,
+        stable_id: str,
+        full_name: str,
+        dep_source_url: str,
+    ) -> Person:
+        """Find-or-create Person + PersonExternalId(namespace='camera').
+
+        M5: source_url is required on person_external_ids (set to the
+        deputato RDF URI observed when the person was first seen).
+        """
+        stmt = (
+            select(Person)
+            .join(PersonExternalId, PersonExternalId.person_id == Person.id)
+            .where(
+                PersonExternalId.namespace == "camera",
+                PersonExternalId.external_id == stable_id,
+            )
+        )
+        result = await session.execute(stmt)
+        person = result.scalar_one_or_none()
+        if person is not None:
+            return person
+
+        person = Person(primary_full_name=full_name)
+        session.add(person)
+        await session.flush()  # get person.id
+        ext = PersonExternalId(
+            person_id=person.id,
+            namespace="camera",
+            external_id=stable_id,
+            source_url=dep_source_url,
+        )
+        session.add(ext)
+        await session.flush()
+        return person
+
+    async def _ingest_mandati(
+        self, session: AsyncSession, *, max_pages: int | None = None,
+    ) -> int:
+        """Ingest mandates as temporal arcs Persona -> Camera.
+
+        Each mandate yields:
+        - Upsert Person (keyed by stable Camera id, e.g. ``d302103``)
+        - Insert Mandate(person_id, chamber='camera', legislature, start_date,
+          end_date, motivo_termine, source_url=mandate RDF URI)
+
+        Rows without ``startDate`` are skipped with a warning (M5 forbids
+        mandates without a start date).
+        """
+        endpoint = settings.camera_sparql_endpoint
+        rows = self._sparql_paginated(endpoint, QUERY_MANDATI, max_pages=max_pages)
+
+        count = 0
+        skipped_no_start = 0
+        skipped_bad_uri = 0
+        for row in rows:
+            mandato_uri = row.get("mandato", "")
+            dep_uri = row.get("dep", "")
+            if not mandato_uri or not dep_uri:
+                continue
+
+            parsed = parse_camera_person_id(dep_uri)
+            if parsed is None:
+                skipped_bad_uri += 1
+                continue
+            stable_id, leg = parsed
+
+            start_date = _parse_date(row.get("startDate", ""))
+            if start_date is None:
+                skipped_no_start += 1
+                logger.warning(
+                    "Mandato %s skipped: startDate missing (M5 violation).",
+                    mandato_uri,
+                )
+                continue
+
+            end_date = _parse_date(row.get("endDate", ""))
+            motivo = row.get("motivo") or None
+            nome = row.get("nome", "")
+            cognome = row.get("cognome", "")
+            full_name = f"{cognome} {nome}".strip()
+
+            person = await self._upsert_person_camera(
+                session,
+                stable_id=stable_id,
+                full_name=full_name,
+                dep_source_url=dep_uri,
+            )
+
+            # Dedup by unique (person_id, chamber, legislature, start_date)
+            stmt = select(Mandate).where(
+                Mandate.person_id == person.id,
+                Mandate.chamber == "camera",
+                Mandate.legislature == leg,
+                Mandate.start_date == start_date,
+            )
+            existing = (await session.execute(stmt)).scalar_one_or_none()
+            if existing is not None:
+                # Update end_date / motivo if newly observed
+                if end_date is not None and existing.end_date != end_date:
+                    existing.end_date = end_date
+                if motivo and existing.motivo_termine != motivo:
+                    existing.motivo_termine = motivo
+                continue
+
+            mandate = Mandate(
+                person_id=person.id,
+                chamber="camera",
+                legislature=leg,
+                start_date=start_date,
+                end_date=end_date,
+                motivo_termine=motivo,
+                source_url=mandato_uri,
+            )
+            session.add(mandate)
+            count += 1
+
+        await session.flush()
+        logger.info(
+            "Camera mandati: %d inserted, skipped no-start=%d, skipped bad-uri=%d.",
+            count, skipped_no_start, skipped_bad_uri,
+        )
+        return count
+
+    async def _ingest_party_memberships(
+        self, session: AsyncSession, *, max_pages: int | None = None,
+    ) -> int:
+        """Ingest party adhesions as temporal arcs Persona -> party.
+
+        `ocd:dataInizio` may be absent on ``ocd:aderisce`` records — we
+        fall back to the legislature opening date so M5 (start_date NOT NULL)
+        is satisfied. The source_url is the adhesion RDF URI.
+        """
+        endpoint = settings.camera_sparql_endpoint
+        rows = self._sparql_paginated(endpoint, QUERY_ADESIONI, max_pages=max_pages)
+
+        count = 0
+        for row in rows:
+            dep_uri = row.get("dep", "")
+            gruppo = (row.get("gruppo") or "").strip()
+            adesione_uri = row.get("adesione", "")
+            if not dep_uri or not gruppo or not adesione_uri:
+                continue
+
+            parsed = parse_camera_person_id(dep_uri)
+            if parsed is None:
+                continue
+            stable_id, _leg = parsed
+
+            start_date = _parse_date(row.get("dataAdesione", "")) or LEG_19_START
+            end_date = _parse_date(row.get("dataFineAdesione", ""))
+
+            # Need existing person (must have been inserted by _ingest_mandati).
+            stmt = (
+                select(Person)
+                .join(PersonExternalId, PersonExternalId.person_id == Person.id)
+                .where(
+                    PersonExternalId.namespace == "camera",
+                    PersonExternalId.external_id == stable_id,
+                )
+            )
+            person = (await session.execute(stmt)).scalar_one_or_none()
+            if person is None:
+                # Adesione for an unknown person — create minimal Person record.
+                person = await self._upsert_person_camera(
+                    session,
+                    stable_id=stable_id,
+                    full_name=stable_id,  # placeholder; refreshed on mandate pass
+                    dep_source_url=dep_uri,
+                )
+
+            # Dedup: same person + party + start_date
+            stmt2 = select(PartyMembership).where(
+                PartyMembership.person_id == person.id,
+                PartyMembership.party == gruppo,
+                PartyMembership.start_date == start_date,
+            )
+            existing = (await session.execute(stmt2)).scalar_one_or_none()
+            if existing is not None:
+                if end_date is not None and existing.end_date != end_date:
+                    existing.end_date = end_date
+                continue
+
+            membership = PartyMembership(
+                person_id=person.id,
+                party=gruppo,
+                start_date=start_date,
+                end_date=end_date,
+                source_url=adesione_uri,
+            )
+            session.add(membership)
             count += 1
 
         await session.flush()
