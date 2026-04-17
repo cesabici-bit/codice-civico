@@ -1,0 +1,29 @@
+{
+  "_comment": "SPARQL live snapshot 2026-04-18 from dati.senato.it. Query: SELECT ?sen ?nome ?cognome ?mandato ?inizio ?fine WHERE { ?sen a osr:Senatore ; foaf:firstName ?nome ; foaf:lastName ?cognome ; osr:mandato ?mandato . ?mandato osr:legislatura 19 . OPTIONAL { ?mandato osr:inizio ?inizio } OPTIONAL { ?mandato osr:fine ?fine } } LIMIT 10. Duplicates collapsed to DISTINCT rows.",
+  "results": {
+    "bindings": [
+      {
+        "sen": {"type": "uri", "value": "http://dati.senato.it/senatore/22922"},
+        "nome": {"type": "literal", "value": "Benedetto"},
+        "cognome": {"type": "literal", "value": "Della Vedova"},
+        "mandato": {"type": "uri", "value": "http://dati.senato.it/mandato/C_19_22922_1"},
+        "inizio": {"type": "literal", "value": "2022-10-13"}
+      },
+      {
+        "sen": {"type": "uri", "value": "http://dati.senato.it/senatore/29040"},
+        "nome": {"type": "literal", "value": "Bruno"},
+        "cognome": {"type": "literal", "value": "Astorre"},
+        "mandato": {"type": "uri", "value": "http://dati.senato.it/mandato/S_19_29040_1"},
+        "inizio": {"type": "literal", "value": "2022-10-13"},
+        "fine": {"type": "literal", "value": "2023-03-03"}
+      },
+      {
+        "sen": {"type": "uri", "value": "http://dati.senato.it/senatore/29132"},
+        "nome": {"type": "literal", "value": "Bruno"},
+        "cognome": {"type": "literal", "value": "Marton"},
+        "mandato": {"type": "uri", "value": "http://dati.senato.it/mandato/S_19_29132_1"},
+        "inizio": {"type": "literal", "value": "2022-10-13"}
+      }
+    ]
+  }
+}

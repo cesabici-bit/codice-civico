@@ -1,6 +1,7 @@
 """Senato della Repubblica SPARQL data ingestor."""
 
 import logging
+import re
 from datetime import date
 
 from sqlalchemy import select
@@ -8,9 +9,37 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from codicecivico.config import settings
 from codicecivico.ingest.base import BaseIngestor, clean_text
-from codicecivico.models import LegislativeAct, Politician
+from codicecivico.models import (
+    LegislativeAct,
+    Mandate,
+    Person,
+    PersonExternalId,
+    Politician,
+)
 
 logger = logging.getLogger(__name__)
+
+LEG_19_SENATO_START = date(2022, 10, 13)
+
+# Person-id regex for Senato: `senatore/{N}` — bare numeric id, no prefix.
+# Verified live 2026-04-18: senatore/22922 (Della Vedova, leg 19),
+# senatore/63 (Amoruso, historical, linked to Camera via owl:sameAs).
+_SENATO_PERSON_URI_RE = re.compile(r"^https?://dati\.senato\.it/senatore/(\d+)$")
+
+
+def parse_senato_person_id(uri: str | None) -> str | None:
+    """Extract the numeric person id from a Senato RDF URI.
+
+    Returns the bare integer as a string (to be used as
+    `PersonExternalId.external_id` in namespace ``senato``), or
+    ``None`` when the URI does not match.
+    """
+    if not uri:
+        return None
+    match = _SENATO_PERSON_URI_RE.match(uri)
+    if match is None:
+        return None
+    return match.group(1)
 
 # ---------------------------------------------------------------------------
 # SPARQL query templates (verified against dati.senato.it 2026-03-23)
@@ -79,6 +108,28 @@ WHERE {
 } LIMIT {limit} OFFSET {offset}
 """
 
+# F10 bitemporal: Senato mandates as temporal arcs Persona -> Senato.
+# Verified live 2026-04-18. Note: a senator's ``osr:mandato`` set may
+# include C_* mandates (retrospective Camera mandates) — we accept those
+# as Senato-originated rows here (source provenance is Senato SPARQL),
+# and a separate subtask (ST-10.4) will use owl:sameAs chains to merge
+# them with Camera-side identities.
+QUERY_MANDATI_SENATO = """
+PREFIX osr: <http://dati.senato.it/osr/>
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+SELECT DISTINCT ?sen ?nome ?cognome ?mandato ?inizio ?fine ?tipoFine
+WHERE {
+  ?sen a osr:Senatore .
+  ?sen foaf:firstName ?nome .
+  ?sen foaf:lastName ?cognome .
+  ?sen osr:mandato ?mandato .
+  ?mandato osr:legislatura 19 .
+  OPTIONAL { ?mandato osr:inizio ?inizio }
+  OPTIONAL { ?mandato osr:fine ?fine }
+  OPTIONAL { ?mandato osr:tipoFineMandato ?tipoFine }
+} LIMIT {limit} OFFSET {offset}
+"""
+
 
 def _parse_date_senato(raw: str) -> date | None:
     """Parse date from Senato SPARQL (various formats)."""
@@ -122,10 +173,14 @@ class SenatoIngestor(BaseIngestor):
         try:
             n = await self._ingest_senatori(session)
             total += n
-            logger.info("Senato: %d senatori ingested.", n)
+            logger.info("Senato: %d senatori ingested (legacy politicians table).", n)
+
+            n = await self._ingest_mandati_senato(session, max_pages=limit)
+            total += n
+            logger.info("Senato: %d mandati ingested (F10 bitemporal).", n)
 
             n = await self._ingest_gruppi(session)
-            logger.info("Senato: %d group memberships updated.", n)
+            logger.info("Senato: %d group memberships updated (legacy).", n)
 
             n = await self._ingest_votazioni(session, max_pages=limit)
             total += n
@@ -222,6 +277,147 @@ class SenatoIngestor(BaseIngestor):
                 count += 1
 
         await session.flush()
+        return count
+
+    # ------------------------------------------------------------------
+    # F10 bitemporal ingestion — persons + mandates (Senato side)
+    # ------------------------------------------------------------------
+
+    async def _upsert_person_senato(
+        self,
+        session: AsyncSession,
+        *,
+        stable_id: str,
+        full_name: str,
+        sen_source_url: str,
+    ) -> Person:
+        """Find-or-create Person + PersonExternalId(namespace='senato')."""
+        stmt = (
+            select(Person)
+            .join(PersonExternalId, PersonExternalId.person_id == Person.id)
+            .where(
+                PersonExternalId.namespace == "senato",
+                PersonExternalId.external_id == stable_id,
+            )
+        )
+        result = await session.execute(stmt)
+        person = result.scalar_one_or_none()
+        if person is not None:
+            return person
+
+        person = Person(primary_full_name=full_name)
+        session.add(person)
+        await session.flush()
+        ext = PersonExternalId(
+            person_id=person.id,
+            namespace="senato",
+            external_id=stable_id,
+            source_url=sen_source_url,
+        )
+        session.add(ext)
+        await session.flush()
+        return person
+
+    async def _ingest_mandati_senato(
+        self, session: AsyncSession, *, max_pages: int | None = None,
+    ) -> int:
+        """Ingest Senato mandates as temporal arcs Persona -> Senato.
+
+        Chamber is tagged by mandate URI prefix: mandates starting with
+        ``/mandato/S_`` go to chamber='senato'; ``/mandato/C_`` are Camera
+        retrospective mandates surfaced by the Senato endpoint and map to
+        chamber='camera' (later reconciled via owl:sameAs in ST-10.4).
+        Rows without ``inizio`` are skipped (M5: valid_from NOT NULL).
+        """
+        endpoint = settings.senato_sparql_endpoint
+        rows = self._sparql_paginated(
+            endpoint, QUERY_MANDATI_SENATO, max_pages=max_pages,
+        )
+
+        count = 0
+        skipped_no_start = 0
+        skipped_bad_uri = 0
+        for row in rows:
+            sen_uri = row.get("sen", "")
+            mandato_uri = row.get("mandato", "")
+            if not sen_uri or not mandato_uri:
+                continue
+
+            stable_id = parse_senato_person_id(sen_uri)
+            if stable_id is None:
+                skipped_bad_uri += 1
+                continue
+
+            start_date = _parse_date_senato(row.get("inizio", ""))
+            if start_date is None:
+                skipped_no_start += 1
+                logger.warning(
+                    "Senato mandato %s skipped: inizio missing (M5).",
+                    mandato_uri,
+                )
+                continue
+
+            end_date = _parse_date_senato(row.get("fine", ""))
+            tipo_fine = row.get("tipoFine") or None
+
+            # Derive chamber + legislature from mandate URI:
+            # http://dati.senato.it/mandato/{S|C}_{leg}_{id}_{k}
+            chamber = "senato"
+            leg = 19
+            try:
+                tail = mandato_uri.rsplit("/", 1)[1]  # S_19_29040_1
+                parts = tail.split("_")
+                if parts and parts[0].upper() == "C":
+                    chamber = "camera"
+                if len(parts) > 1 and parts[1].isdigit():
+                    leg = int(parts[1])
+            except (IndexError, ValueError):
+                # Fallback: treat as Senato leg 19
+                pass
+
+            nome = row.get("nome", "")
+            cognome = row.get("cognome", "")
+            full_name = f"{cognome} {nome}".strip()
+
+            person = await self._upsert_person_senato(
+                session,
+                stable_id=stable_id,
+                full_name=full_name,
+                sen_source_url=sen_uri,
+            )
+
+            # Dedup by unique (person_id, chamber, legislature, start_date)
+            stmt = select(Mandate).where(
+                Mandate.person_id == person.id,
+                Mandate.chamber == chamber,
+                Mandate.legislature == leg,
+                Mandate.start_date == start_date,
+            )
+            existing = (await session.execute(stmt)).scalar_one_or_none()
+            if existing is not None:
+                if end_date is not None and existing.end_date != end_date:
+                    existing.end_date = end_date
+                if tipo_fine and existing.motivo_termine != tipo_fine:
+                    existing.motivo_termine = tipo_fine
+                continue
+
+            mandate = Mandate(
+                person_id=person.id,
+                chamber=chamber,
+                legislature=leg,
+                start_date=start_date,
+                end_date=end_date,
+                motivo_termine=tipo_fine,
+                source_url=mandato_uri,
+            )
+            session.add(mandate)
+            count += 1
+
+        await session.flush()
+        logger.info(
+            "Senato mandati: %d inserted, skipped no-start=%d, bad-uri=%d.",
+            count, skipped_no_start, skipped_bad_uri,
+        )
         return count
 
     async def _ingest_votazioni(
