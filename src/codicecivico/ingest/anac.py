@@ -394,6 +394,154 @@ class AnacIngestor(BaseIngestor):
         """Get last ingested month (YYYY-MM format)."""
         return await self.get_last_checkpoint(session)
 
+    async def update_awards_from_snapshot(
+        self,
+        session: AsyncSession,
+        *,
+        snapshot_date: str,
+        batch_size: int = 2000,
+    ) -> int:
+        """Stream the `aggiudicazioni` ZIP and fill in amount_awarded,
+        award_date, and n_bids on existing Contract rows.
+
+        The `aggiudicazioni` ANAC dataset (distinct from `aggiudicatari`)
+        carries the actual awarded amount and bidder count. Schema verified
+        2026-04-17:
+            "cig";"data_aggiudicazione_definitiva";"esito";...;
+            "importo_aggiudicazione";"ribasso_aggiudicazione";
+            "num_imprese_offerenti";"numero_offerte_ammesse";...
+
+        Args:
+            snapshot_date: YYYYMMDD snapshot date.
+            batch_size: Rows per SQL UPDATE flush.
+
+        Returns:
+            Number of contracts touched.
+        """
+        url = (
+            f"{ANAC_BASE}/aggiudicazioni/filesystem/"
+            f"{snapshot_date}-aggiudicazioni_csv.zip"
+        )
+        logger.info("Streaming aggiudicazioni snapshot %s ...", snapshot_date)
+
+        zip_bytes = await _download_zip(url)
+        if zip_bytes is None:
+            logger.error(
+                "Failed to download aggiudicazioni snapshot %s", snapshot_date,
+            )
+            return 0
+
+        total_updated = 0
+        seen_cigs: set[str] = set()
+        batch: list[dict[str, object]] = []
+
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            csv_names = [n for n in zf.namelist() if n.lower().endswith(".csv")]
+            if not csv_names:
+                return 0
+            csv_name = max(csv_names, key=lambda n: zf.getinfo(n).file_size)
+
+            with zf.open(csv_name) as raw_f:
+                text_f = io.TextIOWrapper(raw_f, encoding="utf-8", errors="replace")
+                first_line = text_f.readline()
+                delimiter = ";" if first_line.count(";") > first_line.count(",") else ","
+
+            with zf.open(csv_name) as raw_f:
+                text_f = io.TextIOWrapper(raw_f, encoding="utf-8", errors="replace")
+                reader = csv.DictReader(text_f, delimiter=delimiter)
+                for row in reader:
+                    cig = (row.get("cig") or "").strip()
+                    if not cig or cig in seen_cigs:
+                        continue
+                    seen_cigs.add(cig)
+
+                    amount = _parse_decimal(row.get("importo_aggiudicazione") or "")
+                    award_date_val = _parse_date_anac(
+                        row.get("data_aggiudicazione_definitiva") or "",
+                    )
+                    # prefer num_imprese_offerenti (total bidders), fall back to
+                    # numero_offerte_ammesse (admitted offers)
+                    n_bids_raw = (
+                        (row.get("num_imprese_offerenti") or "").strip()
+                        or (row.get("numero_offerte_ammesse") or "").strip()
+                    )
+                    n_bids_val: int | None = None
+                    if n_bids_raw.isdigit():
+                        n_bids_val = int(n_bids_raw)
+
+                    # Skip if nothing useful to write
+                    if amount is None and award_date_val is None and n_bids_val is None:
+                        continue
+
+                    batch.append(
+                        {
+                            "ocid": f"ocds-hu01ve-{cig}",
+                            "amount_awarded": amount,
+                            "award_date": award_date_val,
+                            "n_bids": n_bids_val,
+                        },
+                    )
+
+                    if len(batch) >= batch_size:
+                        total_updated += await self._flush_award_batch(session, batch)
+                        batch = []
+                        logger.info(
+                            "Aggiudicazioni: %d contracts updated so far "
+                            "(%d unique CIGs seen)...",
+                            total_updated,
+                            len(seen_cigs),
+                        )
+
+                if batch:
+                    total_updated += await self._flush_award_batch(session, batch)
+
+        await session.commit()
+        logger.info(
+            "Aggiudicazioni: %d contracts updated (%d unique CIGs in snapshot).",
+            total_updated,
+            len(seen_cigs),
+        )
+        return total_updated
+
+    async def _flush_award_batch(
+        self,
+        session: AsyncSession,
+        batch: list[dict[str, object]],
+    ) -> int:
+        """UPDATE contracts with award info. Only fills NULL fields to keep
+        the first-snapshot-wins semantics (idempotent across runs).
+        """
+        updated = 0
+        for row in batch:
+            ocid = row["ocid"]
+            values: dict[str, object] = {}
+            if row.get("amount_awarded") is not None:
+                values["amount_awarded"] = row["amount_awarded"]
+            if row.get("award_date") is not None:
+                values["award_date"] = row["award_date"]
+            if row.get("n_bids") is not None:
+                values["n_bids"] = row["n_bids"]
+            if not values:
+                continue
+            # Only overwrite NULL fields so repeated runs don't clobber data
+            stmt = (
+                update(Contract)
+                .where(
+                    Contract.ocid == ocid,
+                    # At least one target field must still be NULL; otherwise skip
+                    (
+                        Contract.amount_awarded.is_(None)
+                        | Contract.award_date.is_(None)
+                        | Contract.n_bids.is_(None)
+                    ),
+                )
+                .values(**values)
+            )
+            result = await session.execute(stmt)
+            updated += result.rowcount or 0
+        await session.flush()
+        return updated
+
     async def update_suppliers_from_snapshot(
         self,
         session: AsyncSession,

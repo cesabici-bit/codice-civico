@@ -119,6 +119,31 @@ def decode_entities() -> None:
     )
 
 
+@cli.command("anac-awards")
+@click.option(
+    "--snapshot",
+    required=True,
+    help="Aggiudicazioni snapshot date YYYYMMDD (e.g. 20260401).",
+)
+def anac_awards(snapshot: str) -> None:
+    """Update contracts with amount_awarded / award_date / n_bids.
+
+    Streams the `aggiudicazioni` dataset (distinct from `aggiudicatari`)
+    and fills NULL fields on existing Contract rows. Idempotent.
+    """
+    from codicecivico.ingest.anac import AnacIngestor
+
+    async def _run() -> int:
+        async with async_session() as session:
+            ingestor = AnacIngestor()
+            return await ingestor.update_awards_from_snapshot(
+                session, snapshot_date=snapshot,
+            )
+
+    total = _run_async(_run())
+    click.echo(f"[anac-awards] Updated {total} contracts with award info.")
+
+
 @cli.command("anac-suppliers")
 @click.option(
     "--snapshot",
