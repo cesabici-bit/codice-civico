@@ -71,7 +71,9 @@ services:
     depends_on:
       - backend
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000"]
+      # 127.0.0.1 (not localhost) — Next.js standalone binds IPv4 only,
+      # and busybox wget resolves localhost to ::1 first.
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000"]
       interval: 30s
       timeout: 5s
       start_period: 10s
