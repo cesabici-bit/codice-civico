@@ -1,9 +1,17 @@
 # Status — Codice Civico
 
 ## Fase Corrente
-Sprint 1 (F11 Entity Resolution) CHIUSO come non applicabile sui dati attuali (vedi KNOWN_ISSUES EC-015) | F9.5 Anomaly Calibration COMPLETED & DEPLOYED | F9 Deploy Live COMPLETED | F8-F2 COMPLETED
+Sprint 2 (F10 Graph Layer) IN CORSO — **schema bitemporale committato `2be6b8f` (2026-04-18)** | Sprint 1 (F11 Entity Resolution) CHIUSO EC-015 | F9.5 Anomaly Calibration DEPLOYED | F8-F2 COMPLETED
 
-**Prossimo**: Sprint 2 → F10 Graph Layer (tabella relationships + CTE ricorsive + endpoint /graph)
+**Prossimo (F10, ordine)**:
+1. Ricerca ontologia Senato: esiste `osr:mandato` su `dati.senato.it` con pattern analogo a `ocd:mandatoCamera`? Qual è il pattern URI senatore? (decide strategia link Camera↔Senato)
+2. Riscrivere `CameraIngestor` su `ocd:mandatoCamera` + regex `dr(\d+)_\d+` per `person_id` deterministico; popolare `persons` + `person_external_ids` + `mandates` + `party_memberships`
+3. Se identificatore persona Senato separato: link via `person_external_ids` (namespace `wikidata` o `owl:sameAs`)
+4. Endpoint `/graph/expand` con CTE ricorsiva 2-hop
+5. Test L1/L2 (regex, bitemporal query, M5 enforcement), poi Gate F10
+6. Applicare migration 0002 su VPS prod
+
+**Schema F10 già fatto (commit `2be6b8f`)**: 5 tabelle (persons, person_external_ids, mandates, party_memberships, relationships), M5 enforced (source_url NOT NULL), CK temporali, polimorfismo relationships, upgrade/downgrade verificati localmente su pg16+pgvector. 227 test verdi.
 
 ## Ultimo Subtask Completato
 F9.5 (2026-04-17) — Anomaly Calibration. Committed commits `0defa3d` (codice) + `9098243` (roadmap). Deployed VPS.
