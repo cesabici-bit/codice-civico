@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from codicecivico.config import settings
 from codicecivico.ingest.base import BaseIngestor, clean_text
+from codicecivico.ingest.camera import parse_camera_person_id
 from codicecivico.models import (
     LegislativeAct,
     Mandate,
@@ -40,6 +41,30 @@ def parse_senato_person_id(uri: str | None) -> str | None:
     if match is None:
         return None
     return match.group(1)
+
+
+def extract_sameas_camera_link(
+    row: dict[str, str],
+) -> tuple[str, str] | None:
+    """Map a ``owl:sameAs`` SPARQL row to a ``(senato_id, camera_id)`` pair.
+
+    Expects keys ``sen`` and ``sameAs`` with URI string values.
+    Returns ``None`` when either parser rejects the URI (historical
+    ``dd`` prefix, malformed URI, non-Camera target, etc.), so upstream
+    code can filter with a plain ``if link is None: continue``.
+    """
+    sen_uri = row.get("sen")
+    same_uri = row.get("sameAs")
+    if not sen_uri or not same_uri:
+        return None
+    senato_id = parse_senato_person_id(sen_uri)
+    if senato_id is None:
+        return None
+    camera_parsed = parse_camera_person_id(same_uri)
+    if camera_parsed is None:
+        return None
+    camera_id, _leg = camera_parsed
+    return senato_id, camera_id
 
 # ---------------------------------------------------------------------------
 # SPARQL query templates (verified against dati.senato.it 2026-03-23)
@@ -105,6 +130,23 @@ WHERE {
   OPTIONAL { ?ddl osr:dataPresentazione ?dataPresentazione }
   OPTIONAL { ?ddl osr:statoDdl ?stato }
   OPTIONAL { ?ddl osr:natura ?natura }
+} LIMIT {limit} OFFSET {offset}
+"""
+
+# F10 ST-10.4: owl:sameAs chain senator -> mandato/C_* -> Camera deputy URI.
+# Scoped to senators with at least one leg-19 mandate (so they exist in our
+# DB after ST-10.3). Each row yields (senator_id, camera_stable_id) after
+# regex validation — modern `d` prefix only, historical `dd` dropped (EC-015).
+QUERY_SAMEAS_CAMERA = """
+PREFIX osr: <http://dati.senato.it/osr/>
+PREFIX owl: <http://www.w3.org/2002/07/owl#>
+SELECT DISTINCT ?sen ?mandato ?sameAs WHERE {
+  ?sen a osr:Senatore .
+  ?sen osr:mandato ?currentMandate .
+  ?currentMandate osr:legislatura 19 .
+  ?sen osr:mandato ?mandato .
+  ?mandato owl:sameAs ?sameAs .
+  FILTER(STRSTARTS(STR(?sameAs), "http://dati.camera.it/"))
 } LIMIT {limit} OFFSET {offset}
 """
 
@@ -178,6 +220,9 @@ class SenatoIngestor(BaseIngestor):
             n = await self._ingest_mandati_senato(session, max_pages=limit)
             total += n
             logger.info("Senato: %d mandati ingested (F10 bitemporal).", n)
+
+            n = await self._link_camera_senato_sameas(session, max_pages=limit)
+            logger.info("Senato: %d Camera links added via owl:sameAs.", n)
 
             n = await self._ingest_gruppi(session)
             logger.info("Senato: %d group memberships updated (legacy).", n)
@@ -419,6 +464,90 @@ class SenatoIngestor(BaseIngestor):
             count, skipped_no_start, skipped_bad_uri,
         )
         return count
+
+    async def _link_camera_senato_sameas(
+        self, session: AsyncSession, *, max_pages: int | None = None,
+    ) -> int:
+        """Attach ``camera:{stable_id}`` external_id to existing Senato Persons.
+
+        Uses the ``owl:sameAs`` chain exposed by the Senato endpoint.
+        Behavior:
+        - For each (senato_id, camera_id) pair extracted from the query,
+          locate the existing Person by ``senato:{senato_id}``.
+        - If that Person already has ``camera:{camera_id}``, skip.
+        - If a DIFFERENT Person (from prior Camera ingestion) already claims
+          ``camera:{camera_id}``, do NOT merge — log a conflict. Merging
+          two entities is out of scope for ST-10.4 (zero-defect policy).
+        - Otherwise attach the new external_id to the Senato Person with
+          ``source_url`` = sameAs Camera URI (M5 satisfied).
+        """
+        endpoint = settings.senato_sparql_endpoint
+        rows = self._sparql_paginated(
+            endpoint, QUERY_SAMEAS_CAMERA, max_pages=max_pages,
+        )
+
+        linked = 0
+        skipped_historical = 0
+        conflicts = 0
+        missing_senato_person = 0
+
+        for row in rows:
+            link = extract_sameas_camera_link(row)
+            if link is None:
+                skipped_historical += 1
+                continue
+            senato_id, camera_id = link
+            same_uri = row.get("sameAs", "")
+
+            # Find the Senato-side Person (must exist from ST-10.3 ingest).
+            stmt = (
+                select(Person)
+                .join(PersonExternalId, PersonExternalId.person_id == Person.id)
+                .where(
+                    PersonExternalId.namespace == "senato",
+                    PersonExternalId.external_id == senato_id,
+                )
+            )
+            senato_person = (await session.execute(stmt)).scalar_one_or_none()
+            if senato_person is None:
+                missing_senato_person += 1
+                continue
+
+            # Check if camera:{camera_id} is already attached to this or
+            # another person.
+            stmt2 = select(PersonExternalId).where(
+                PersonExternalId.namespace == "camera",
+                PersonExternalId.external_id == camera_id,
+            )
+            existing_link = (await session.execute(stmt2)).scalar_one_or_none()
+            if existing_link is not None:
+                if existing_link.person_id == senato_person.id:
+                    continue  # already linked
+                conflicts += 1
+                logger.warning(
+                    "owl:sameAs conflict: camera:%s owned by %s but Senato "
+                    "claims it for %s (skipping merge, manual review needed)",
+                    camera_id, existing_link.person_id, senato_person.id,
+                )
+                continue
+
+            # Safe to attach.
+            ext = PersonExternalId(
+                person_id=senato_person.id,
+                namespace="camera",
+                external_id=camera_id,
+                source_url=same_uri,
+            )
+            session.add(ext)
+            linked += 1
+
+        await session.flush()
+        logger.info(
+            "owl:sameAs links: %d added, %d historical skipped, "
+            "%d conflicts, %d senators not found in DB.",
+            linked, skipped_historical, conflicts, missing_senato_person,
+        )
+        return linked
 
     async def _ingest_votazioni(
         self, session: AsyncSession, *, max_pages: int | None = None,

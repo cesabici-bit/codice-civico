@@ -1,0 +1,32 @@
+{
+  "_comment": "SPARQL live snapshot 2026-04-18 from dati.senato.it. Query traverses senator -> mandato/C_* -> owl:sameAs -> camera deputato URI. Requires the senator to have at least one leg-19 mandate so the person exists in our DB.",
+  "results": {
+    "bindings": [
+      {
+        "sen": {"type": "uri", "value": "http://dati.senato.it/senatore/5799"},
+        "mandato": {"type": "uri", "value": "http://dati.senato.it/mandato/C_15_5799_1"},
+        "sameAs": {"type": "uri", "value": "http://dati.camera.it/ocd/deputato.rdf/d300246_15"}
+      },
+      {
+        "sen": {"type": "uri", "value": "http://dati.senato.it/senatore/5799"},
+        "mandato": {"type": "uri", "value": "http://dati.senato.it/mandato/C_16_5799_1"},
+        "sameAs": {"type": "uri", "value": "http://dati.camera.it/ocd/deputato.rdf/d300246_16"}
+      },
+      {
+        "sen": {"type": "uri", "value": "http://dati.senato.it/senatore/5799"},
+        "mandato": {"type": "uri", "value": "http://dati.senato.it/mandato/C_14_5799_1"},
+        "sameAs": {"type": "uri", "value": "http://dati.camera.it/ocd/deputato.rdf/dd300246_14"}
+      },
+      {
+        "sen": {"type": "uri", "value": "http://dati.senato.it/senatore/32898"},
+        "mandato": {"type": "uri", "value": "http://dati.senato.it/mandato/C_18_32898_1"},
+        "sameAs": {"type": "uri", "value": "http://dati.camera.it/ocd/deputato.rdf/d307708_18"}
+      },
+      {
+        "sen": {"type": "uri", "value": "http://dati.senato.it/senatore/22918"},
+        "mandato": {"type": "uri", "value": "http://dati.senato.it/mandato/C_15_22918_1"},
+        "sameAs": {"type": "uri", "value": "http://dati.camera.it/ocd/deputato.rdf/d301569_15"}
+      }
+    ]
+  }
+}

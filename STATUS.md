@@ -6,19 +6,23 @@ Sprint 2 (F10 Graph Layer) IN CORSO — **CameraIngestor rewrite F10 completato 
 **Prossimo (F10, ordine aggiornato)**:
 1. ~~Ricerca ontologia Senato~~ DONE 2026-04-17 (vedi ROADMAP Sprint 2)
 2. ~~Riscrivere `CameraIngestor` su `ocd:mandatoCamera`~~ DONE 2026-04-18 (ST-10.2). Vedi EC-016.
-3. ~~Riscrivere `SenatoIngestor` su `osr:mandato`~~ DONE 2026-04-18 (ST-10.3). Regex `senatore/(\d+)` (URI persona-stabile bare integer, verificato live). QUERY_MANDATI_SENATO popola persons+external_ids(ns='senato')+mandates con chamber derivato dal prefisso URI (`S_`→senato, `C_`→camera retrospettivo).
-4. **ST-10.4 NEXT**: owl:sameAs link Camera↔Senato — per ogni mandato C_* collegato a senatore, aggiungere `camera:{stable_id}` external_id alla Person esistente, con gestione conflitti (due Person separate → log per review)
-5. ST-10.5: Senato party_memberships (richiede traversal blank node `adesione → gruppo → denominazione → titolo` con window matching)
-6. Popolamento `relationships` da dati esistenti (contract→buyer, law→sponsor, speech→speaker)
-7. Endpoint `/graph/{type}/{id}/expand?hops=2&as_of=YYYY-MM-DD` con CTE ricorsiva bitemporale
-8. Test L1/L2 (traversal 2-hop, M5 insert rejection, idempotency), poi Gate F10
-9. Applicare migration 0002 su VPS prod + re-run CameraIngestor + SenatoIngestor live
+3. ~~Riscrivere `SenatoIngestor`~~ DONE 2026-04-18 (ST-10.3). Regex `senatore/(\d+)`, chamber derivato da prefisso URI mandato.
+4. ~~owl:sameAs link Camera↔Senato~~ DONE 2026-04-18 (ST-10.4). `extract_sameas_camera_link` + `_link_camera_senato_sameas` attaccano `camera:{stable_id}` alla Person Senato esistente; conflitti loggati senza merge (zero-defect).
+5. **ST-10.5 NEXT**: Senato party_memberships (richiede traversal blank node `adesione → gruppo → denominazione → titolo` con window matching di periodi)
+6. ST-10.6: Popolamento `relationships` da dati esistenti (contract→buyer, law→sponsor, speech→speaker)
+7. ST-10.7: Endpoint `/graph/{type}/{id}/expand?hops=2&as_of=YYYY-MM-DD` con CTE ricorsiva bitemporale
+8. ST-10.8: Test L1/L2 (traversal 2-hop, M5 insert rejection, idempotency), poi Gate F10
+9. ST-10.9: Applicare migration 0002 su VPS prod + re-run CameraIngestor + SenatoIngestor live
+
+**Raccomandazione prossima sessione**: `/clear` prima di ST-10.5 (contesto party + blank-node traversal è distinto dal lavoro regex/SPARQL di questa sessione).
 
 **Schema F10 (commit `2be6b8f`)**: 5 tabelle (persons, person_external_ids, mandates, party_memberships, relationships), M5 enforced (source_url NOT NULL), CK temporali, polimorfismo relationships, upgrade/downgrade verificati localmente.
 
 **ST-10.2 CameraIngestor F10 (2026-04-18)**: `parse_camera_person_id()` estrae `(stable_id, legislature)` da URI `deputato.rdf/d\d+_\d+`. `_ingest_mandati` popola persons+person_external_ids(ns='camera')+mandates (M5: skip con warning se startDate assente). `_ingest_party_memberships` popola party_memberships con fallback a LEG_19_START se dataAdesione assente. Fixture `camera_mandati.json` costruita da live snapshot SPARQL. **245 test verdi** (+18 nuovi L1/L2). Commit `8ff768d`.
 
-**ST-10.3 SenatoIngestor F10 (2026-04-18)**: `parse_senato_person_id()` estrae stable_id numerico da `senatore/{N}`. `_ingest_mandati_senato` popola persons+external_ids(ns='senato')+mandates. Chamber derivato da prefisso URI mandato (`S_` → senato, `C_` → camera retrospettivo); legislatura estratta sempre da mandate URI (non hardcoded a 19), quindi il flow ingesce anche storia pregressa esposta tramite la persona senatore. M5 enforced: skip con warning se `osr:inizio` assente. Fixture `senato_mandati.json` live snapshot. **256 test verdi** (+11 nuovi).
+**ST-10.3 SenatoIngestor F10 (2026-04-18)**: `parse_senato_person_id()` estrae stable_id numerico da `senatore/{N}`. `_ingest_mandati_senato` popola persons+external_ids(ns='senato')+mandates. Chamber derivato da prefisso URI mandato (`S_` → senato, `C_` → camera retrospettivo); legislatura estratta sempre da mandate URI (non hardcoded a 19). M5 enforced. **256 test verdi** (+11). Commit `402a42e`.
+
+**ST-10.4 Camera↔Senato owl:sameAs link (2026-04-18)**: `extract_sameas_camera_link()` mappa riga SPARQL → (senato_id, camera_stable_id) riusando regex Camera/Senato già verificate. `QUERY_SAMEAS_CAMERA` filtra senatori con almeno un mandato leg 19 (esistono nel DB). `_link_camera_senato_sameas` attacca `camera:{stable_id}` alla Person Senato esistente; conflitti (camera già claimato da altra Person) sono LOGGATI senza merge (zero-defect: merge entità distinte richiede review umana). Storico `dd\d+` scartato (EC-015). **265 test verdi** (+9).
 
 ## Ultimo Subtask Completato
 F9.5 (2026-04-17) — Anomaly Calibration. Committed commits `0defa3d` (codice) + `9098243` (roadmap). Deployed VPS.
