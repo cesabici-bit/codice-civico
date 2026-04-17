@@ -7,8 +7,21 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from codicecivico import __version__
+from codicecivico.anomaly.rules import (
+    LAST_MINUTE_DAYS,
+    PRICE_SPIKE_MIN_SAMPLES,
+    PRICE_SPIKE_Z_THRESHOLD,
+    SHORT_DURATION_DAYS,
+    SPLIT_GIANT_CLUSTER_SIZE,
+    SPLIT_LOOKBACK_DAYS,
+    SPLIT_MIN_SIMILAR,
+    SPLIT_SUPPLIER_DIVERSITY_MAX,
+    SPLIT_THRESHOLD_EUR,
+)
 from codicecivico.api.deps import get_db
 from codicecivico.api.schemas import (
+    AnomalyCalibrationResponse,
+    AnomalyRuleCalibration,
     HealthDetailedResponse,
     HealthResponse,
     StatsOverview,
@@ -111,4 +124,92 @@ async def stats_overview(
         laws=laws or 0,
         promises=promises or 0,
         court_stats=court_stats or 0,
+    )
+
+
+@router.get("/stats/anomaly-calibration", response_model=AnomalyCalibrationResponse)
+async def anomaly_calibration(
+    session: AsyncSession = Depends(get_db),
+) -> AnomalyCalibrationResponse:
+    """Transparency endpoint: per-rule flag rates, severity distribution,
+    and active thresholds.
+
+    Exposes calibration state so reviewers can audit the detector without
+    reading source code. Data updates after each `codicecivico train` run.
+    """
+    total_contracts = await session.scalar(select(func.count(Contract.id))) or 0
+
+    flagged = await session.scalar(
+        select(func.count(func.distinct(AnomalyFlag.contract_id))),
+    ) or 0
+
+    high_risk = await session.scalar(
+        select(func.count(Contract.id)).where(Contract.risk_score >= 70),
+    ) or 0
+    medium_risk = await session.scalar(
+        select(func.count(Contract.id)).where(
+            Contract.risk_score >= 40, Contract.risk_score < 70,
+        ),
+    ) or 0
+
+    # Per-rule breakdown with severity split
+    per_rule_rows = (
+        await session.execute(
+            select(
+                AnomalyFlag.flag_type,
+                AnomalyFlag.severity,
+                func.count(AnomalyFlag.id),
+            ).group_by(AnomalyFlag.flag_type, AnomalyFlag.severity),
+        )
+    ).all()
+
+    agg: dict[str, dict[str, int]] = {}
+    for flag_type, severity, n in per_rule_rows:
+        bucket = agg.setdefault(
+            flag_type, {"total": 0, "high": 0, "medium": 0, "low": 0},
+        )
+        bucket["total"] += n
+        if severity in ("high", "medium", "low"):
+            bucket[severity] += n
+
+    rules_payload = [
+        AnomalyRuleCalibration(
+            flag_type=ftype,
+            total_flags=vals["total"],
+            pct_of_contracts=(
+                round(100.0 * vals["total"] / total_contracts, 3)
+                if total_contracts else 0.0
+            ),
+            severity_high=vals["high"],
+            severity_medium=vals["medium"],
+            severity_low=vals["low"],
+        )
+        for ftype, vals in sorted(
+            agg.items(), key=lambda kv: -kv[1]["total"],
+        )
+    ]
+
+    thresholds: dict[str, object] = {
+        "split_threshold_eur": SPLIT_THRESHOLD_EUR,
+        "split_lookback_days": SPLIT_LOOKBACK_DAYS,
+        "split_min_similar": SPLIT_MIN_SIMILAR,
+        "split_supplier_diversity_max": SPLIT_SUPPLIER_DIVERSITY_MAX,
+        "split_giant_cluster_size": SPLIT_GIANT_CLUSTER_SIZE,
+        "price_spike_z_threshold": PRICE_SPIKE_Z_THRESHOLD,
+        "price_spike_min_samples": PRICE_SPIKE_MIN_SAMPLES,
+        "last_minute_days": LAST_MINUTE_DAYS,
+        "short_duration_days": SHORT_DURATION_DAYS,
+    }
+
+    return AnomalyCalibrationResponse(
+        total_contracts=total_contracts,
+        flagged_contracts=flagged,
+        flagged_pct=(
+            round(100.0 * flagged / total_contracts, 2)
+            if total_contracts else 0.0
+        ),
+        contracts_high_risk=high_risk,
+        contracts_medium_risk=medium_risk,
+        rules=rules_payload,
+        thresholds=thresholds,
     )

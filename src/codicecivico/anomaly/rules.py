@@ -6,16 +6,30 @@
 - SOURCE: OECD "Preventing Corruption in Public Procurement" (2016)
 """
 
+import math
 from dataclasses import dataclass
+from datetime import date, timedelta
 from decimal import Decimal
 from enum import Enum
 
-# Thresholds (tunable, based on ANAC/EU benchmarks)
+# Thresholds (calibrated empirically against ANAC 2025-12 dataset)
 SPLIT_THRESHOLD_EUR = 40_000  # Under €40k = affidamento diretto allowed
 SPLIT_LOOKBACK_DAYS = 90  # Same buyer+CPV within 90 days
+SPLIT_MIN_SIMILAR = 5  # N contratti simili per flaggare (era 3, troppo permissivo)
+# Filtro A: diversità fornitori. Se ≥60% dei contratti nel cluster ha fornitori
+# DIVERSI, non è frazionamento artificioso (procurement operativo normale).
+# Il vero frazionamento ha tipicamente pochi fornitori ricorrenti sui lotti spezzati.
+SPLIT_SUPPLIER_DIVERSITY_MAX = 0.6
+# Filtro B: cluster "giganti" (>20) su CPV-8 stretto = procurement continuo di
+# grande PA centralizzata, non frazionamento. Declassato a LOW severity.
+SPLIT_GIANT_CLUSTER_SIZE = 20
 LAST_MINUTE_DAYS = 15  # < 15 days between publication and deadline
 SHORT_DURATION_DAYS = 30  # Contract duration < 30 days
-PRICE_SPIKE_FACTOR = 3.0  # > 3x the CPV median = anomalous
+# PRICE_SPIKE: z-score on log(amount) per CPV-8 bucket.
+# Procurement amounts are log-normal — a flat ratio vs median over-flags
+# legitimate long-tail contracts. 3 sigma ≈ p99.87 of a normal distribution.
+PRICE_SPIKE_Z_THRESHOLD = 3.0
+PRICE_SPIKE_MIN_SAMPLES = 30  # need at least 30 contracts to fit (mu, sigma)
 
 
 class FlagType(str, Enum):
@@ -124,8 +138,18 @@ def check_split_contracts(
 ) -> RedFlag | None:
     """SPLIT_CONTRACTS: Buyer splits a larger procurement into pieces < €40k.
 
-    Detects when a buyer has multiple contracts with same CPV code, each just
-    below the threshold that would require a competitive procedure.
+    Detects when a buyer has multiple sub-threshold contracts with same full
+    CPV-8 code within a 90-day rolling window — the pattern of artificial
+    fragmentation to avoid competitive procedures.
+
+    Calibrazione (vs ANAC 2025-12, 170k contratti):
+    - CPV[:8] (era CPV[:5]): il prefisso-5 aggregava famiglie merceologiche
+      eterogenee; enti grandi con procurement ordinario venivano flaggati.
+    - Finestra 90gg (era: nessun filtro temporale — bug): richiesto pattern
+      di frazionamento temporalmente clustered, non "3+ sub-soglia nel 2025".
+    - n >= 5 (era n >= 3): 3 affidamenti diretti same-CPV8 in 90gg sono
+      ordinary procurement per enti medi; 5+ alza significativamente il prior.
+
     SOURCE: ANAC Rapporto 2023 — frazionamento artificioso degli appalti
     """
     if buyer_contracts is None:
@@ -140,63 +164,129 @@ def check_split_contracts(
     if not cpv or not buyer_cf:
         return None
 
-    # Count contracts from same buyer with same CPV prefix (first 5 digits)
-    cpv_prefix = str(cpv)[:5]
-    similar = [
-        c for c in buyer_contracts
-        if (
-            str(c.get("cpv_code", ""))[:5] == cpv_prefix
-            and c.get("buyer_cf") == buyer_cf
-            and _to_float(c.get("amount_original") or c.get("amount_awarded"))
-            < SPLIT_THRESHOLD_EUR
-        )
-    ]
+    cpv_full = _cpv_main(cpv)
+    pub_date = _as_date(contract.get("publication_date"))
+    window_start = pub_date - timedelta(days=SPLIT_LOOKBACK_DAYS) if pub_date else None
+    window_end = pub_date + timedelta(days=SPLIT_LOOKBACK_DAYS) if pub_date else None
 
-    if len(similar) >= 3:
-        total = sum(
-            _to_float(c.get("amount_original") or c.get("amount_awarded"))
-            for c in similar
-        )
-        return RedFlag(
-            flag_type=FlagType.SPLIT_CONTRACTS,
-            severity=Severity.HIGH if total > SPLIT_THRESHOLD_EUR * 2 else Severity.MEDIUM,
-            details={
-                "n_similar_contracts": len(similar),
-                "total_amount": round(total, 2),
-                "cpv_prefix": cpv_prefix,
-                "threshold": SPLIT_THRESHOLD_EUR,
-            },
-        )
-    return None
+    similar = []
+    for c in buyer_contracts:
+        if _cpv_main(c.get("cpv_code", "")) != cpv_full:
+            continue
+        if c.get("buyer_cf") != buyer_cf:
+            continue
+        c_amt = _to_float(c.get("amount_original") or c.get("amount_awarded"))
+        if c_amt >= SPLIT_THRESHOLD_EUR:
+            continue
+        # Rolling 90-day window around the contract's publication date.
+        # If either date missing, fall back to including the sibling (conservative).
+        c_pub = _as_date(c.get("publication_date"))
+        if window_start and window_end and c_pub:
+            if not (window_start <= c_pub <= window_end):
+                continue
+        similar.append(c)
+
+    if len(similar) < SPLIT_MIN_SIMILAR:
+        return None
+
+    # Filtro A: supplier diversity. Cluster con fornitori molto diversificati
+    # = procurement ordinario, non frazionamento artificioso.
+    cluster_contracts = [*similar, contract]
+    suppliers = {
+        str(c.get("supplier_cf")).strip()
+        for c in cluster_contracts
+        if c.get("supplier_cf")
+    }
+    n_with_supplier = sum(
+        1 for c in cluster_contracts if c.get("supplier_cf")
+    )
+    if n_with_supplier >= SPLIT_MIN_SIMILAR:
+        diversity = len(suppliers) / n_with_supplier
+        if diversity >= SPLIT_SUPPLIER_DIVERSITY_MAX:
+            return None
+    else:
+        diversity = None  # Troppi supplier mancanti per giudicare — procedi
+
+    total = sum(
+        _to_float(c.get("amount_original") or c.get("amount_awarded"))
+        for c in similar
+    )
+
+    # Filtro B: cluster giganti (>20) = procurement continuo, non splitting.
+    # Declassato a LOW (contribuisce poco al risk_score ma resta visibile).
+    if len(similar) >= SPLIT_GIANT_CLUSTER_SIZE:
+        severity = Severity.LOW
+    elif total > SPLIT_THRESHOLD_EUR * 2:
+        severity = Severity.HIGH
+    else:
+        severity = Severity.MEDIUM
+
+    return RedFlag(
+        flag_type=FlagType.SPLIT_CONTRACTS,
+        severity=severity,
+        details={
+            "n_similar_contracts": len(similar),
+            "total_amount": round(total, 2),
+            "cpv_full": cpv_full,
+            "window_days": SPLIT_LOOKBACK_DAYS,
+            "threshold": SPLIT_THRESHOLD_EUR,
+            "n_unique_suppliers": len(suppliers),
+            "supplier_diversity": (
+                round(diversity, 3) if diversity is not None else None
+            ),
+        },
+    )
 
 
 def check_price_spike(
     contract: dict[str, object],
-    cpv_median: float | None = None,
+    cpv_log_stats: tuple[float, float, int] | None = None,
 ) -> RedFlag | None:
-    """PRICE_SPIKE: Contract amount anomalously high for its CPV code.
+    """PRICE_SPIKE: Contract amount statistically anomalous for its CPV-8 bucket.
 
-    Compares amount to the median for the same CPV category.
+    Procurement amounts within a CPV-8 code follow a log-normal distribution.
+    Flag if log(amount) > mu + 3*sigma (≈ p99.87 of the log-normal), computed
+    over same CPV-8 bucket from the current dataset.
+
+    Args:
+        cpv_log_stats: (mu, sigma, n) of log(amount) for this contract's CPV-8
+                       bucket. None = bucket too small or missing, skip.
+
+    Calibrazione (vs ANAC 2025-12, 170k contratti):
+    - Metrica: z-score su log(amount) per CPV-8 (era: amount > 3x median su CPV-5).
+      La distribuzione degli importi è log-normale con p95/mediana fino a 29.000x
+      per alcuni CPV — 3x mediana corrispondeva al ~p60, generando il 22% flag rate.
+    - Threshold z=3: ~p99.87 (one-tailed) — riduce drasticamente falsi positivi
+      mantenendo rilevazione di outlier reali.
+    - Min 30 samples per bucket: sotto tale soglia (mu, sigma) non sono affidabili.
+
     SOURCE: OECD "Preventing Corruption in Public Procurement" — price benchmarking
     """
-    if cpv_median is None or cpv_median <= 0:
+    if cpv_log_stats is None:
+        return None
+    mu, sigma, n_samples = cpv_log_stats
+    if n_samples < PRICE_SPIKE_MIN_SAMPLES or sigma <= 0:
         return None
 
     amount = _to_float(contract.get("amount_original") or contract.get("amount_awarded"))
     if amount <= 0:
         return None
 
-    ratio = amount / cpv_median
-    if ratio > PRICE_SPIKE_FACTOR:
-        severity = Severity.HIGH if ratio > 10 else Severity.MEDIUM
+    log_amt = math.log(amount)
+    z = (log_amt - mu) / sigma
+    if z > PRICE_SPIKE_Z_THRESHOLD:
+        severity = Severity.HIGH if z > 5.0 else Severity.MEDIUM
         return RedFlag(
             flag_type=FlagType.PRICE_SPIKE,
             severity=severity,
             details={
                 "amount": amount,
-                "cpv_median": round(cpv_median, 2),
-                "ratio": round(ratio, 2),
-                "threshold_factor": PRICE_SPIKE_FACTOR,
+                "cpv_geometric_mean": round(math.exp(mu), 2),
+                "cpv_log_mean": round(mu, 3),
+                "cpv_log_stddev": round(sigma, 3),
+                "z_score": round(z, 2),
+                "cpv_sample_size": n_samples,
+                "threshold_z": PRICE_SPIKE_Z_THRESHOLD,
             },
         )
     return None
@@ -261,7 +351,7 @@ def check_all_rules(
     contract: dict[str, object],
     *,
     buyer_contracts: list[dict[str, object]] | None = None,
-    cpv_median: float | None = None,
+    cpv_log_stats: tuple[float, float, int] | None = None,
     supplier_win_count: int | None = None,
     buyer_total_contracts: int | None = None,
     extensions_count: int | None = None,
@@ -280,7 +370,7 @@ def check_all_rules(
         check_last_minute(contract),
         check_short_duration(contract),
         check_split_contracts(contract, buyer_contracts),
-        check_price_spike(contract, cpv_median),
+        check_price_spike(contract, cpv_log_stats),
         check_revolving_door(contract, supplier_win_count, buyer_total_contracts),
         check_extension_abuse(contract, extensions_count),
     ]
@@ -314,3 +404,24 @@ def _safe_str(value: object) -> str:
     if value is None:
         return "N/A"
     return str(value)
+
+
+def _cpv_main(cpv: object) -> str:
+    """Extract the 8-digit main CPV code (strip check-digit suffix like '-8')."""
+    if not cpv:
+        return ""
+    s = str(cpv).split("-", 1)[0].strip()
+    return s[:8]
+
+
+def _as_date(value: object) -> date | None:
+    """Coerce a value to date, accepting date, datetime, or ISO string."""
+    if value is None:
+        return None
+    if isinstance(value, date):
+        # datetime is subclass of date — date() normalizes both
+        return value if type(value) is date else value.date()  # type: ignore[attr-defined]
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except (ValueError, TypeError):
+        return None

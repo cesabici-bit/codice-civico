@@ -73,6 +73,32 @@ export function fetchStatsOverview() {
   return apiFetch<StatsOverview>("/stats/overview", { revalidate: 300 });
 }
 
+export interface AnomalyRuleCalibration {
+  flag_type: string;
+  total_flags: number;
+  pct_of_contracts: number;
+  severity_high: number;
+  severity_medium: number;
+  severity_low: number;
+}
+
+export interface AnomalyCalibrationResponse {
+  total_contracts: number;
+  flagged_contracts: number;
+  flagged_pct: number;
+  contracts_high_risk: number;
+  contracts_medium_risk: number;
+  rules: AnomalyRuleCalibration[];
+  thresholds: Record<string, number | string>;
+}
+
+export function fetchAnomalyCalibration() {
+  return apiFetch<AnomalyCalibrationResponse>(
+    "/stats/anomaly-calibration",
+    { revalidate: 300 },
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Politicians
 // ---------------------------------------------------------------------------

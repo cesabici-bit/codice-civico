@@ -33,6 +33,34 @@ class StatsOverview(BaseModel):
     court_stats: int
 
 
+class AnomalyRuleCalibration(BaseModel):
+    """Calibration data for a single anomaly rule."""
+
+    flag_type: str
+    total_flags: int
+    pct_of_contracts: float
+    severity_high: int
+    severity_medium: int
+    severity_low: int
+
+
+class AnomalyCalibrationResponse(BaseModel):
+    """Full calibration transparency payload for the dashboard.
+
+    Exposes rule-by-rule FPR proxies, severity distribution, and the current
+    configured thresholds so users/reviewers can audit the detector without
+    reading source code. Powers the "Calibrazione" panel in the dashboard.
+    """
+
+    total_contracts: int
+    flagged_contracts: int
+    flagged_pct: float
+    contracts_high_risk: int  # risk_score >= 70
+    contracts_medium_risk: int  # 40 <= risk_score < 70
+    rules: list[AnomalyRuleCalibration]
+    thresholds: dict[str, object]
+
+
 # ---------------------------------------------------------------------------
 # Politicians
 # ---------------------------------------------------------------------------

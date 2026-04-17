@@ -7,6 +7,7 @@ writes AnomalyFlag rows and updates Contract.risk_score.
 from __future__ import annotations
 
 import logging
+import math
 import statistics
 from collections import defaultdict
 from decimal import Decimal
@@ -19,7 +20,11 @@ from codicecivico.anomaly.ml import (
     predict_anomaly_scores,
     train_model,
 )
-from codicecivico.anomaly.rules import check_all_rules
+from codicecivico.anomaly.rules import (
+    PRICE_SPIKE_MIN_SAMPLES,
+    _cpv_main,
+    check_all_rules,
+)
 from codicecivico.anomaly.scorer import compute_risk_score
 from codicecivico.models import AnomalyFlag, Contract
 
@@ -71,29 +76,40 @@ async def run_anomaly_pipeline(
     dicts = [_contract_to_dict(c) for c in contracts]
 
     # --- Aggregates for rule context ---
-    cpv_amounts: dict[str, list[float]] = defaultdict(list)
+    # CPV-8 bucket: list of log(amount) per contract for log-normal z-score.
+    cpv_log_amounts: dict[str, list[float]] = defaultdict(list)
     buyer_total_contracts: dict[str, int] = defaultdict(int)
     supplier_wins_per_buyer: dict[tuple[str, str], int] = defaultdict(int)
     buyer_contracts_lookup: dict[str, list[dict[str, object]]] = defaultdict(list)
 
     for d in dicts:
-        cpv = str(d.get("cpv_code") or "")[:5]
+        cpv8 = _cpv_main(d.get("cpv_code"))
         buyer = str(d.get("buyer_cf") or "")
         supplier = str(d.get("supplier_cf") or "")
         amt_raw = d.get("amount_original") or d.get("amount_awarded")
         amt = float(amt_raw) if amt_raw is not None else 0.0
 
-        if cpv and amt > 0:
-            cpv_amounts[cpv].append(amt)
+        if cpv8 and amt > 0:
+            cpv_log_amounts[cpv8].append(math.log(amt))
         if buyer:
             buyer_total_contracts[buyer] += 1
             buyer_contracts_lookup[buyer].append(d)
         if buyer and supplier:
             supplier_wins_per_buyer[(buyer, supplier)] += 1
 
-    cpv_median = {
-        cpv: statistics.median(vals) for cpv, vals in cpv_amounts.items() if vals
-    }
+    # (mu, sigma, n) on log(amount) per CPV-8. Skip buckets with insufficient samples.
+    cpv_log_stats: dict[str, tuple[float, float, int]] = {}
+    for cpv8, logs in cpv_log_amounts.items():
+        n = len(logs)
+        if n < PRICE_SPIKE_MIN_SAMPLES:
+            continue
+        mu = statistics.fmean(logs)
+        sigma = statistics.stdev(logs) if n >= 2 else 0.0
+        cpv_log_stats[cpv8] = (mu, sigma, n)
+    logger.info(
+        "CPV-8 price buckets: %d qualifying (>=%d samples) out of %d total.",
+        len(cpv_log_stats), PRICE_SPIKE_MIN_SAMPLES, len(cpv_log_amounts),
+    )
 
     # --- ML training + scoring ---
     features, cig_ids = extract_features(dicts)
@@ -116,14 +132,14 @@ async def run_anomaly_pipeline(
     for idx, (contract_row, d) in enumerate(zip(contracts, dicts, strict=False)):
         ocid = str(d.get("ocid") or "")
         buyer = str(d.get("buyer_cf") or "")
-        cpv = str(d.get("cpv_code") or "")[:5]
+        cpv8 = _cpv_main(d.get("cpv_code"))
         supplier = str(d.get("supplier_cf") or "")
         ml_score = ocid_to_score.get(ocid, 0.0)
 
         flags = check_all_rules(
             d,
             buyer_contracts=buyer_contracts_lookup.get(buyer) if buyer else None,
-            cpv_median=cpv_median.get(cpv),
+            cpv_log_stats=cpv_log_stats.get(cpv8),
             supplier_win_count=(
                 supplier_wins_per_buyer.get((buyer, supplier))
                 if buyer and supplier

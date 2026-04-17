@@ -81,43 +81,193 @@ class TestShortDuration:
 
 
 class TestSplitContracts:
-    def test_fires_when_3_similar_contracts(self) -> None:
+    def test_fires_when_5_similar_contracts_in_window(self) -> None:
         """L2: Split contracts are ANAC's most investigated anomaly.
         # SOURCE: ANAC Rapporto Annuale 2023 — frazionamento artificioso
         """
+        from datetime import date
         buyer_contracts = [
-            {"cpv_code": "90911-1", "buyer_cf": "ABC", "amount_original": Decimal("35000")},
-            {"cpv_code": "90911-2", "buyer_cf": "ABC", "amount_original": Decimal("38000")},
-            {"cpv_code": "90911-3", "buyer_cf": "ABC", "amount_original": Decimal("39000")},
+            {"cpv_code": "90911000-1", "buyer_cf": "ABC",
+             "amount_original": Decimal("35000"), "publication_date": date(2025, 6, 5)},
+            {"cpv_code": "90911000-2", "buyer_cf": "ABC",
+             "amount_original": Decimal("38000"), "publication_date": date(2025, 6, 10)},
+            {"cpv_code": "90911000-3", "buyer_cf": "ABC",
+             "amount_original": Decimal("39000"), "publication_date": date(2025, 6, 20)},
+            {"cpv_code": "90911000-4", "buyer_cf": "ABC",
+             "amount_original": Decimal("36000"), "publication_date": date(2025, 7, 1)},
+            {"cpv_code": "90911000-5", "buyer_cf": "ABC",
+             "amount_original": Decimal("37000"), "publication_date": date(2025, 7, 15)},
         ]
         contract = {
-            "cpv_code": "90911-4", "buyer_cf": "ABC",
+            "cpv_code": "90911000-6", "buyer_cf": "ABC",
             "amount_original": Decimal("35000"),
+            "publication_date": date(2025, 7, 1),
         }
         flag = check_split_contracts(contract, buyer_contracts)
         assert flag is not None
         assert flag.flag_type == FlagType.SPLIT_CONTRACTS
-        assert flag.details["n_similar_contracts"] >= 3
+        assert flag.details["n_similar_contracts"] >= 5
+
+    def test_no_flag_when_outside_90_day_window(self) -> None:
+        """Contracts spread across >90 days are not clustered fragmentation."""
+        from datetime import date
+        buyer_contracts = [
+            {"cpv_code": "90911000", "buyer_cf": "ABC",
+             "amount_original": Decimal("35000"), "publication_date": date(2024, 1, 1)},
+            {"cpv_code": "90911000", "buyer_cf": "ABC",
+             "amount_original": Decimal("38000"), "publication_date": date(2024, 6, 1)},
+            {"cpv_code": "90911000", "buyer_cf": "ABC",
+             "amount_original": Decimal("39000"), "publication_date": date(2024, 12, 1)},
+            {"cpv_code": "90911000", "buyer_cf": "ABC",
+             "amount_original": Decimal("36000"), "publication_date": date(2025, 6, 1)},
+            {"cpv_code": "90911000", "buyer_cf": "ABC",
+             "amount_original": Decimal("37000"), "publication_date": date(2025, 12, 1)},
+        ]
+        contract = {
+            "cpv_code": "90911000", "buyer_cf": "ABC",
+            "amount_original": Decimal("35000"),
+            "publication_date": date(2025, 12, 15),
+        }
+        assert check_split_contracts(contract, buyer_contracts) is None
+
+    def test_no_flag_below_min_threshold(self) -> None:
+        """3 contratti simili non bastano più (n>=5)."""
+        from datetime import date
+        buyer_contracts = [
+            {"cpv_code": "90911000", "buyer_cf": "ABC",
+             "amount_original": Decimal("35000"), "publication_date": date(2025, 6, 5)},
+            {"cpv_code": "90911000", "buyer_cf": "ABC",
+             "amount_original": Decimal("38000"), "publication_date": date(2025, 6, 10)},
+            {"cpv_code": "90911000", "buyer_cf": "ABC",
+             "amount_original": Decimal("39000"), "publication_date": date(2025, 6, 20)},
+        ]
+        contract = {
+            "cpv_code": "90911000", "buyer_cf": "ABC",
+            "amount_original": Decimal("35000"),
+            "publication_date": date(2025, 6, 15),
+        }
+        assert check_split_contracts(contract, buyer_contracts) is None
 
     def test_no_flag_without_context(self) -> None:
-        contract = {"cpv_code": "12345", "amount_original": Decimal("30000")}
+        contract = {"cpv_code": "12345678", "amount_original": Decimal("30000")}
         assert check_split_contracts(contract) is None
+
+    def test_no_flag_when_suppliers_are_diverse(self) -> None:
+        """Filtro A: ≥60% fornitori diversi = procurement ordinario, non split.
+
+        # SOURCE: ANAC Rapporto 2023 — il frazionamento artificioso si
+        # riconosce per la concentrazione su pochi fornitori; la varietà
+        # di fornitori su stesso CPV/buyer indica procurement operativo.
+        """
+        from datetime import date
+        # 6 contratti con 6 fornitori diversi → diversity = 1.0
+        buyer_contracts = [
+            {"cpv_code": "33690000", "buyer_cf": "ABC", "supplier_cf": f"S{i:03d}",
+             "amount_original": Decimal("35000"),
+             "publication_date": date(2025, 6, 1 + i)}
+            for i in range(6)
+        ]
+        contract = {
+            "cpv_code": "33690000", "buyer_cf": "ABC", "supplier_cf": "S999",
+            "amount_original": Decimal("35000"),
+            "publication_date": date(2025, 6, 15),
+        }
+        assert check_split_contracts(contract, buyer_contracts) is None
+
+    def test_fires_when_suppliers_concentrated(self) -> None:
+        """Pattern sospetto: molti contratti, pochi fornitori ripetuti."""
+        from datetime import date
+        # 6 contratti con solo 2 fornitori → diversity = 2/7 ≈ 0.29
+        buyer_contracts = [
+            {"cpv_code": "33690000", "buyer_cf": "ABC", "supplier_cf": "S001",
+             "amount_original": Decimal("35000"),
+             "publication_date": date(2025, 6, 1)},
+            {"cpv_code": "33690000", "buyer_cf": "ABC", "supplier_cf": "S001",
+             "amount_original": Decimal("38000"),
+             "publication_date": date(2025, 6, 5)},
+            {"cpv_code": "33690000", "buyer_cf": "ABC", "supplier_cf": "S002",
+             "amount_original": Decimal("39000"),
+             "publication_date": date(2025, 6, 10)},
+            {"cpv_code": "33690000", "buyer_cf": "ABC", "supplier_cf": "S001",
+             "amount_original": Decimal("37000"),
+             "publication_date": date(2025, 6, 15)},
+            {"cpv_code": "33690000", "buyer_cf": "ABC", "supplier_cf": "S002",
+             "amount_original": Decimal("36000"),
+             "publication_date": date(2025, 6, 20)},
+        ]
+        contract = {
+            "cpv_code": "33690000", "buyer_cf": "ABC", "supplier_cf": "S001",
+            "amount_original": Decimal("35000"),
+            "publication_date": date(2025, 6, 25),
+        }
+        flag = check_split_contracts(contract, buyer_contracts)
+        assert flag is not None
+        assert flag.details["supplier_diversity"] < 0.6
+
+    def test_giant_cluster_declassed_to_low(self) -> None:
+        """Filtro B: >20 contratti simili = procurement continuo, severity=LOW."""
+        from datetime import date
+        # 21 contratti con solo 3 fornitori (diversity 3/22 ≈ 0.14, pass filtro A)
+        buyer_contracts = [
+            {"cpv_code": "33690000", "buyer_cf": "ABC",
+             "supplier_cf": f"S{i % 3:03d}",
+             "amount_original": Decimal("35000"),
+             "publication_date": date(2025, 6, 1)}
+            for i in range(21)
+        ]
+        contract = {
+            "cpv_code": "33690000", "buyer_cf": "ABC", "supplier_cf": "S000",
+            "amount_original": Decimal("35000"),
+            "publication_date": date(2025, 6, 15),
+        }
+        flag = check_split_contracts(contract, buyer_contracts)
+        assert flag is not None
+        assert flag.severity == Severity.LOW
 
 
 class TestPriceSpike:
-    def test_fires_when_3x_median(self) -> None:
+    def test_fires_when_z_over_3(self) -> None:
+        """L2: log-normal z-score > 3 sigma (~p99.87) on CPV-8 bucket.
+
+        # SOURCE: OECD "Preventing Corruption in Public Procurement" (2016),
+        # Ch.3 — price benchmarking via statistical distribution of offers.
+        """
+        import math
+        # Bucket: geometric mean €100k, sigma log = 1.0 (moderate dispersion)
+        # Contract of €3M → log = 14.91, z = (14.91 - 11.51) / 1.0 ≈ 3.4
+        mu = math.log(100_000)
         flag = check_price_spike(
-            {"amount_original": Decimal("400000")},
-            cpv_median=100_000.0,
+            {"amount_original": Decimal("3000000")},
+            cpv_log_stats=(mu, 1.0, 100),
         )
         assert flag is not None
         assert flag.flag_type == FlagType.PRICE_SPIKE
-        assert flag.details["ratio"] == 4.0
+        assert flag.details["z_score"] > 3.0
 
-    def test_no_flag_for_normal_price(self) -> None:
+    def test_no_flag_within_one_sigma(self) -> None:
+        """Prezzo nella coda normale della distribuzione — nessun flag."""
+        import math
+        mu = math.log(100_000)
+        flag = check_price_spike(
+            {"amount_original": Decimal("200000")},  # z ≈ 0.69
+            cpv_log_stats=(mu, 1.0, 100),
+        )
+        assert flag is None
+
+    def test_no_flag_when_bucket_too_small(self) -> None:
+        """Bucket con <30 samples: skip (non abbastanza dati per fittare)."""
+        import math
+        mu = math.log(100_000)
+        flag = check_price_spike(
+            {"amount_original": Decimal("10000000")},
+            cpv_log_stats=(mu, 1.0, 10),  # solo 10 samples
+        )
+        assert flag is None
+
+    def test_no_flag_when_stats_missing(self) -> None:
         assert check_price_spike(
-            {"amount_original": Decimal("120000")},
-            cpv_median=100_000.0,
+            {"amount_original": Decimal("1000000")},
+            cpv_log_stats=None,
         ) is None
 
 
